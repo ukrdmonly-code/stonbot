@@ -226,6 +226,9 @@ def find_products_by_size_and_gender(size: str, gender: str, category: str = Non
         if season and p.get('season') != season:
             continue
         sizes_str = p.get('sizes', '')
+        # Перевіряємо, що sizes_str є рядком, а не числом
+        if not isinstance(sizes_str, str):
+            sizes_str = str(sizes_str) if sizes_str else ""
         if search_pattern in sizes_str:
             result.append(p)
     return result
