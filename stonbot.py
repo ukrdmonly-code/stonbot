@@ -209,7 +209,9 @@ def delete_product_from_sheet(message_id: int):
 
 def get_all_products():
     try:
-        return WORKSHEET.get_all_records()
+        # Отримуємо всі записи, де значення читаються як текст
+        records = WORKSHEET.get_all_records(value_render_option='UNFORMATTED_VALUE')
+        return records
     except Exception as e:
         logger.error(f"Помилка отримання: {e}")
         return []
