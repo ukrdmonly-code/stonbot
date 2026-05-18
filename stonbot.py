@@ -232,8 +232,19 @@ def find_products_by_size_and_gender(size: str, gender: str, category: str = Non
         if season and p.get('season') != season:
             continue
         sizes_str = p.get('sizes', '')
+        
+        # ПРИМУСОВО перетворюємо в рядок, якщо це число
         if not isinstance(sizes_str, str):
-            sizes_str = str(sizes_str) if sizes_str else ""
+            sizes_str = str(sizes_str)
+        
+        # Якщо число (наприклад 4243) - додаємо коми вручну?
+        # Перевіряємо, чи це число без ком
+        if sizes_str.isdigit() and len(sizes_str) > 2:
+            # Розділяємо число на окремі розміри (наприклад 4243 -> 42, 43)
+            import re
+            parts = re.findall(r'\d{2}', sizes_str)
+            sizes_str = "," + ",".join(parts) + ","
+            logger.info(f"   🔄 Перетворено числовий формат: {p.get('message_id')} -> {sizes_str}")
         
         # Шукаємо обидва формати
         if search_pattern_with_comma in sizes_str or sizes_str == search_pattern_without_comma:
