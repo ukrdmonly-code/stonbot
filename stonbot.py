@@ -219,7 +219,6 @@ def find_products_by_size_and_gender(size: str, gender: str, category: str = Non
     result = []
     search_pattern = f",{size},"
     
-    # ДІАГНОСТИКА: виводимо параметри пошуку
     logger.info(f"🔍 ПОШУК: size={size}, gender={gender}, category={category}, season={season}, search_pattern={search_pattern}")
     
     for p in products:
@@ -231,15 +230,17 @@ def find_products_by_size_and_gender(size: str, gender: str, category: str = Non
             continue
         sizes_str = p.get('sizes', '')
         
-        # ДІАГНОСТИКА: виводимо значення sizes_str з таблиці
-        logger.info(f"   Перевіряємо товар: message_id={p.get('message_id')}, sizes_str={sizes_str}, search_pattern={search_pattern}")
-        
-        # Перевіряємо, що sizes_str є рядком, а не числом
+        # Перевіряємо, що sizes_str є рядком
         if not isinstance(sizes_str, str):
             sizes_str = str(sizes_str) if sizes_str else ""
         
+        # Додаткова діагностика
+        logger.info(f"   Товар ID: {p.get('message_id')}, sizes_str='{sizes_str}', довжина={len(sizes_str)}")
+        logger.info(f"   Пошук pattern='{search_pattern}', довжина={len(search_pattern)}")
+        logger.info(f"   Порівняння: {repr(search_pattern)} in {repr(sizes_str)} -> {search_pattern in sizes_str}")
+        
         if search_pattern in sizes_str:
-            logger.info(f"   ✅ ТОВАР ПІДХОДИТЬ: {p.get('message_id')}")
+            logger.info(f"   ✅ ПІДХОДИТЬ: {p.get('message_id')}")
             result.append(p)
         else:
             logger.info(f"   ❌ НЕ ПІДХОДИТЬ: {p.get('message_id')}")
