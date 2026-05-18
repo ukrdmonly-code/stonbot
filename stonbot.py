@@ -217,9 +217,10 @@ def get_all_products():
 def find_products_by_size_and_gender(size: str, gender: str, category: str = None, season: str = None):
     products = get_all_products()
     result = []
-    search_pattern = f",{size},"
+    search_pattern_with_comma = f",{size},"
+    search_pattern_without_comma = size
     
-    logger.info(f"🔍 ПОШУК: size={size}, gender={gender}, category={category}, season={season}, search_pattern={search_pattern}")
+    logger.info(f"🔍 ПОШУК: size={size}, gender={gender}, category={category}, season={season}")
     
     for p in products:
         if p.get('gender') != gender:
@@ -229,21 +230,15 @@ def find_products_by_size_and_gender(size: str, gender: str, category: str = Non
         if season and p.get('season') != season:
             continue
         sizes_str = p.get('sizes', '')
-        
-        # Перевіряємо, що sizes_str є рядком
         if not isinstance(sizes_str, str):
             sizes_str = str(sizes_str) if sizes_str else ""
         
-        # Додаткова діагностика
-        logger.info(f"   Товар ID: {p.get('message_id')}, sizes_str='{sizes_str}', довжина={len(sizes_str)}")
-        logger.info(f"   Пошук pattern='{search_pattern}', довжина={len(search_pattern)}")
-        logger.info(f"   Порівняння: {repr(search_pattern)} in {repr(sizes_str)} -> {search_pattern in sizes_str}")
-        
-        if search_pattern in sizes_str:
-            logger.info(f"   ✅ ПІДХОДИТЬ: {p.get('message_id')}")
+        # Шукаємо обидва формати
+        if search_pattern_with_comma in sizes_str or sizes_str == search_pattern_without_comma:
+            logger.info(f"   ✅ ПІДХОДИТЬ: {p.get('message_id')} (sizes_str={sizes_str})")
             result.append(p)
         else:
-            logger.info(f"   ❌ НЕ ПІДХОДИТЬ: {p.get('message_id')}")
+            logger.info(f"   ❌ НЕ ПІДХОДИТЬ: {p.get('message_id')} (sizes_str={sizes_str})")
     
     logger.info(f"🔍 РЕЗУЛЬТАТ: знайдено {len(result)} товарів")
     return result
