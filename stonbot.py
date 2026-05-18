@@ -222,8 +222,6 @@ def find_products_by_size_and_gender(size: str, gender: str, category: str = Non
     search_pattern_with_comma = f",{size},"
     search_pattern_without_comma = size
     
-    logger.info(f"🔍 ПОШУК: size={size}, gender={gender}, category={category}, season={season}")
-    
     for p in products:
         if p.get('gender') != gender:
             continue
@@ -233,27 +231,20 @@ def find_products_by_size_and_gender(size: str, gender: str, category: str = Non
             continue
         sizes_str = p.get('sizes', '')
         
-        # ПРИМУСОВО перетворюємо в рядок, якщо це число
+        # Примусово перетворюємо в рядок, якщо це число
         if not isinstance(sizes_str, str):
             sizes_str = str(sizes_str)
         
-        # Якщо число (наприклад 4243) - додаємо коми вручну?
-        # Перевіряємо, чи це число без ком
+        # Якщо число (наприклад 4243) - розділяємо на окремі розміри
         if sizes_str.isdigit() and len(sizes_str) > 2:
-            # Розділяємо число на окремі розміри (наприклад 4243 -> 42, 43)
             import re
             parts = re.findall(r'\d{2}', sizes_str)
             sizes_str = "," + ",".join(parts) + ","
-            logger.info(f"   🔄 Перетворено числовий формат: {p.get('message_id')} -> {sizes_str}")
         
         # Шукаємо обидва формати
         if search_pattern_with_comma in sizes_str or sizes_str == search_pattern_without_comma:
-            logger.info(f"   ✅ ПІДХОДИТЬ: {p.get('message_id')} (sizes_str={sizes_str})")
             result.append(p)
-        else:
-            logger.info(f"   ❌ НЕ ПІДХОДИТЬ: {p.get('message_id')} (sizes_str={sizes_str})")
     
-    logger.info(f"🔍 РЕЗУЛЬТАТ: знайдено {len(result)} товарів")
     return result
 
 # ========== КЛАСИ СТАНІВ ==========
