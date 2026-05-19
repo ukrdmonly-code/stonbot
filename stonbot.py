@@ -909,8 +909,13 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
         else:
             admin_to_notify = WOMAN_ADMIN_ID
         
-        # Екрануємо спеціальні символи в items_with_links
-        items_with_links_escaped = escape_markdown(order[7])
+        # items_with_links вже має правильне форматування з бази
+        items_with_links_raw = order[7]
+        # Якщо в тексті вже є зворотні слеші - не екрануємо ще раз
+        if '\\' in items_with_links_raw:
+            items_with_links_escaped = items_with_links_raw
+        else:
+            items_with_links_escaped = escape_markdown(items_with_links_raw)
         
         admin_text = (
             f"✅ **ОПЛАЧЕНО ЗАМОВЛЕННЯ #{order_number}**\n\n"
