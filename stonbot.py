@@ -33,6 +33,9 @@ GROUPS = {
 ADMIN_ID = 7066974597
 WOMAN_ADMIN_ID = 8813891468
 
+# Знижка при онлайн-оплаті (%)
+DISCOUNT_PERCENT = 5
+
 # Категорії (без сезонів, сезони будуть окремо)
 CATEGORIES_BY_GENDER = {
     "чоловік": {
@@ -248,6 +251,13 @@ def find_products_by_size_and_gender(size: str, gender: str, category: str = Non
     
     return result
 
+# ========== ДОПОМІЖНА ФУНКЦІЯ ДЛЯ ЗНИЖКИ ==========
+def calculate_discounted_price(total: float) -> tuple:
+    """Повертає (сума знижки, ціна зі знижкою)"""
+    discount = total * DISCOUNT_PERCENT / 100
+    discounted_price = total - discount
+    return discount, discounted_price
+
 # ========== КЛАСИ СТАНІВ ==========
 class OrderState(StatesGroup):
     waiting_for_name = State()
@@ -301,6 +311,8 @@ cursor.execute("""
         user_city TEXT,
         user_department TEXT,
         total_amount REAL,
+        original_amount REAL,
+        discount_amount REAL,
         items TEXT,
         items_with_links TEXT,
         order_gender TEXT,
@@ -464,12 +476,17 @@ async def show_cart(callback_or_message, user_id: int, edit: bool = False):
             await callback_or_message.answer(text, reply_markup=keyboard)
         return
     
+    discount, discounted_total = calculate_discounted_price(total)
+    
     text = "🛒 **Ваш кошик:**\n\n"
     for item in cart_items:
         product_id, msg_id, group_id, name, size, price, qty = item
         post_link = f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
         text += f"📦 [{name}]({post_link}) (Розмір: {size}) x{qty} = {price * qty} грн\n"
-    text += f"\n💰 **Загальна сума: {total} грн**\n\n"
+    text += f"\n💰 **Загальна сума: {total:.2f} грн**"
+    if discount > 0:
+        text += f"\n🎁 **Ваша знижка (-{DISCOUNT_PERCENT}%): {discount:.2f} грн**"
+    text += f"\n💎 **Сума до оплати: {discounted_total:.2f} грн**\n\n"
     text += "Для оформлення замовлення натисніть '📦 Оформити замовлення'"
     
     keyboard_buttons = []
@@ -554,6 +571,7 @@ async def show_help(callback: types.CallbackQuery):
         "3️⃣ Під товаром натисни 🛒 'В кошик' → товар додасться до кошика.\n\n"
         "4️⃣ Перейди в 🛒 'Кошик' → оформи замовлення → вкажи дані для доставки.\n\n"
         "5️⃣ Після оформлення обери банк (Монобанк або Приватбанк) → підтверди → надішли скріншот чека.\n\n"
+        "🎁 **Знижка {DISCOUNT_PERCENT}% при онлайн-оплаті!**\n\n"
         "📌 **Для взуття:** розміри вказані в європейському форматі (EUR).\n\n"
         "🔄 Змінити стать можна кнопкою в головному меню.",
         keyboard
@@ -608,6 +626,8 @@ async def start_checkout(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Кошик порожній!", show_alert=True)
         return
     
+    discount, discounted_total = calculate_discounted_price(total)
+    
     order_gender = "чоловік"
     for item in cart_items:
         product_id, msg_id, group_id, name, size, price, qty = item
@@ -618,7 +638,13 @@ async def start_checkout(callback: types.CallbackQuery, state: FSMContext):
                 break
         break
     
-    await state.update_data(cart_items=cart_items, total=total, order_gender=order_gender)
+    await state.update_data(
+        cart_items=cart_items, 
+        total=total, 
+        discount=discount, 
+        discounted_total=discounted_total,
+        order_gender=order_gender
+    )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Повернутись до кошика", callback_data="show_cart")]
@@ -658,6 +684,7 @@ async def process_department(message: types.Message, state: FSMContext):
     
     data = await state.get_data()
     total = data.get('total', 0)
+    discounted_total = data.get('discounted_total', total)
     cart_items = data.get('cart_items', [])
     
     items_list = []
@@ -683,7 +710,8 @@ async def process_department(message: types.Message, state: FSMContext):
         f"🏙️ Місто: {data['user_city']}\n"
         f"🏢 Відділення НП: {data['user_department']}\n\n"
         f"📦 **Товари:**\n{items_text}\n\n"
-        f"💰 **Сума до сплати: {total} грн**\n\n"
+        f"💰 **Сума до сплати: {discounted_total:.2f} грн**\n"
+        f"🎁 (знижка -{DISCOUNT_PERCENT}%)\n\n"
         f"Якщо все вірно, натисніть 'Підтвердити замовлення'",
         reply_markup=keyboard,
         parse_mode="Markdown"
@@ -693,7 +721,7 @@ async def process_department(message: types.Message, state: FSMContext):
 @dp.callback_query(lambda c: c.data == "confirm_order")
 async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    total = data.get('total', 0)
+    discounted_total = data.get('discounted_total', 0)
     order_gender = data.get('order_gender', 'чоловік')
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -704,7 +732,8 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
     
     await callback.message.edit_text(
         f"✅ **Стать замовлення:** {order_gender}\n"
-        f"💰 **Сума до сплати:** {total} грн\n\n"
+        f"💰 **Сума до сплати:** {discounted_total:.2f} грн\n"
+        f"🎁 (знижка -{DISCOUNT_PERCENT}%)\n\n"
         f"💳 **Виберіть банк для оплати:**",
         reply_markup=keyboard,
         parse_mode="Markdown"
@@ -716,7 +745,7 @@ async def process_bank_selection(callback: types.CallbackQuery, state: FSMContex
     bank = callback.data.split("_")[1]
     data = await state.get_data()
     order_gender = data.get('order_gender', 'чоловік')
-    total = data.get('total', 0)
+    discounted_total = data.get('discounted_total', 0)
     
     if order_gender == "чоловік":
         cursor.execute(f"SELECT value FROM settings WHERE key = '{bank}_card_man'")
@@ -736,7 +765,8 @@ async def process_bank_selection(callback: types.CallbackQuery, state: FSMContex
     await callback.message.edit_text(
         f"✅ **Вибрано банк:** {'Монобанк' if bank == 'mono' else 'Приватбанк'}\n"
         f"💳 **Картка:** `{card_number}`\n\n"
-        f"💰 **Сума до сплати:** {total} грн\n\n"
+        f"💰 **Сума до сплати:** {discounted_total:.2f} грн\n"
+        f"🎁 (знижка -{DISCOUNT_PERCENT}%)\n\n"
         f"Натисніть 'Підтвердити замовлення' для продовження",
         reply_markup=keyboard,
         parse_mode="Markdown"
@@ -754,6 +784,9 @@ async def final_confirm_order(callback: types.CallbackQuery, state: FSMContext):
     selected_card = data.get('selected_card', '')
     selected_bank = data.get('selected_bank', '')
     order_gender = data.get('order_gender', 'чоловік')
+    original_total = data.get('total', 0)
+    discounted_total = data.get('discounted_total', original_total)
+    discount = data.get('discount', 0)
     
     items_list = []
     items_with_links = []
@@ -769,10 +802,12 @@ async def final_confirm_order(callback: types.CallbackQuery, state: FSMContext):
     
     cursor.execute("""
         INSERT INTO orders (order_number, user_id, user_name, user_phone, user_city, user_department, 
-                           total_amount, items, items_with_links, order_gender, selected_bank, status, payment_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'нове', 'очікує')
+                           total_amount, original_amount, discount_amount, items, items_with_links, 
+                           order_gender, selected_bank, status, payment_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'нове', 'очікує')
     """, (order_number, user_id, data['user_name'], data['user_phone'], 
-          data['user_city'], data['user_department'], data['total'], items_text, items_with_links_text, order_gender, selected_bank))
+          data['user_city'], data['user_department'], discounted_total, original_total, discount,
+          items_text, items_with_links_text, order_gender, selected_bank))
     conn.commit()
     
     clear_cart(user_id)
@@ -794,7 +829,9 @@ async def final_confirm_order(callback: types.CallbackQuery, state: FSMContext):
         f"📞 Телефон: {data['user_phone']}\n"
         f"🏙️ Місто: {data['user_city']}\n"
         f"🏢 Відділення НП: {data['user_department']}\n"
-        f"💰 Сума: {data['total']} грн\n"
+        f"💰 Сума зі знижкою: {discounted_total:.2f} грн\n"
+        f"💰 Оригінальна сума: {original_total:.2f} грн\n"
+        f"🎁 Знижка: {discount:.2f} грн ({DISCOUNT_PERCENT}%)\n"
         f"💳 Банк: {'Монобанк' if selected_bank == 'mono' else 'Приватбанк'}\n"
         f"⚧️ Стать замовлення: {order_gender}\n\n"
         f"📦 **Товари:**\n{items_with_links_text}\n\n"
@@ -807,7 +844,8 @@ async def final_confirm_order(callback: types.CallbackQuery, state: FSMContext):
         f"✅ **Замовлення #{order_number} створено!**\n\n"
         f"💳 **Оплата на картку {selected_bank.upper()}:**\n"
         f"`{selected_card}`\n\n"
-        f"💰 **Сума до сплати:** {data['total']} грн\n\n"
+        f"💰 **Сума до сплати:** {discounted_total:.2f} грн\n"
+        f"🎁 (знижка -{DISCOUNT_PERCENT}%)\n\n"
         f"📸 Після оплати натисніть кнопку 'Додати чек/скрін' та завантажте фото чека.\n\n"
         f"Ми перевіримо оплату та надішлемо замовлення Новою Поштою.",
         reply_markup=keyboard,
@@ -849,10 +887,10 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
                        (file_id, order_number))
         conn.commit()
         
-        cursor.execute("SELECT user_name, user_phone, user_city, user_department, total_amount, items_with_links, order_gender FROM orders WHERE order_number = ?", (order_number,))
+        cursor.execute("SELECT user_name, user_phone, user_city, user_department, total_amount, original_amount, discount_amount, items_with_links, order_gender FROM orders WHERE order_number = ?", (order_number,))
         order = cursor.fetchone()
         
-        if order[6] == "чоловік":
+        if order[8] == "чоловік":
             admin_to_notify = ADMIN_ID
         else:
             admin_to_notify = WOMAN_ADMIN_ID
@@ -864,9 +902,11 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
             f"📞 Телефон: {order[1]}\n"
             f"🏙️ Місто: {order[2]}\n"
             f"🏢 Відділення НП: {order[3]}\n"
-            f"💰 Сума: {order[4]} грн\n"
-            f"⚧️ Стать замовлення: {order[6]}\n\n"
-            f"📦 **Товари:**\n{order[5]}\n\n"
+            f"💰 Сума зі знижкою: {order[4]:.2f} грн\n"
+            f"💰 Оригінальна сума: {order[5]:.2f} грн\n"
+            f"🎁 Знижка: {order[6]:.2f} грн\n"
+            f"⚧️ Стать замовлення: {order[8]}\n\n"
+            f"📦 **Товари:**\n{order[7]}\n\n"
             f"🚀 **Статус: оплата підтверджена! Відправляйте замовлення.**"
         )
         
@@ -934,9 +974,9 @@ async def show_orders(message: types.Message):
         return
     
     if message.from_user.id == ADMIN_ID:
-        cursor.execute("SELECT order_number, user_name, total_amount, selected_bank, status, payment_status, created_at FROM orders WHERE order_gender = 'чоловік' ORDER BY created_at DESC LIMIT 10")
+        cursor.execute("SELECT order_number, user_name, total_amount, original_amount, discount_amount, selected_bank, status, payment_status, created_at FROM orders WHERE order_gender = 'чоловік' ORDER BY created_at DESC LIMIT 10")
     else:
-        cursor.execute("SELECT order_number, user_name, total_amount, selected_bank, status, payment_status, created_at FROM orders WHERE order_gender = 'жінка' ORDER BY created_at DESC LIMIT 10")
+        cursor.execute("SELECT order_number, user_name, total_amount, original_amount, discount_amount, selected_bank, status, payment_status, created_at FROM orders WHERE order_gender = 'жінка' ORDER BY created_at DESC LIMIT 10")
     
     orders = cursor.fetchall()
     
@@ -946,8 +986,8 @@ async def show_orders(message: types.Message):
     
     text = "📋 **Останні замовлення:**\n\n"
     for order in orders:
-        bank_name = "Монобанк" if order[3] == "mono" else "Приватбанк" if order[3] else "—"
-        text += f"#{order[0]} | {order[1]} | {order[2]} грн | {bank_name} | {order[4]} | {order[5]} | {order[6][:10]}\n"
+        bank_name = "Монобанк" if order[5] == "mono" else "Приватбанк" if order[5] else "—"
+        text += f"#{order[0]} | {order[1]} | {order[2]:.2f} грн (зі знижкою) | {bank_name} | {order[6]} | {order[7]} | {order[8][:10]}\n"
     
     await message.answer(text, parse_mode="Markdown")
 
@@ -977,6 +1017,10 @@ async def admin_info(message: types.Message):
         "• **🌞 Літо**: літо, літній, спекотно, легкий, пляж\n"
         "• **🍂 Демісезон**: демісезон, весна, осінь, дощ, вітровка\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💰 **Знижка:**\n"
+        "• При онлайн-оплаті надається знижка {DISCOUNT_PERCENT}%\n"
+        "• Знижка автоматично застосовується при оформленні замовлення\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
         "💳 **Встановлення карток:**\n"
         "• `/setcard mono man 4149-XXXX-XXXX-XXXX` — твоя Монобанк\n"
         "• `/setcard privat man 5168-XXXX-XXXX-XXXX` — твій Приватбанк\n"
@@ -994,8 +1038,8 @@ async def admin_info(message: types.Message):
     )
     
     await message.answer(text, parse_mode="Markdown")
-# ========== ТИМЧАСОВА КОМАНДА ДЛЯ ДІАГНОСТИКИ ==========
 
+# ========== ТИМЧАСОВА КОМАНДА ДЛЯ ДІАГНОСТИКИ ==========
 @dp.message(Command("test_season"))
 async def test_season(message: types.Message):
     if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
@@ -1010,8 +1054,8 @@ async def test_season(message: types.Message):
             break
     
     await message.answer(result, parse_mode="Markdown")
-# ========== НОВА КОМАНДА /del_product ==========
 
+# ========== НОВА КОМАНДА /del_product ==========
 @dp.message(Command("del_product"))
 async def delete_product(message: types.Message):
     if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
@@ -1029,6 +1073,7 @@ async def delete_product(message: types.Message):
         await message.answer(f"✅ Товар з ID {message_id} видалено з бази.")
     except Exception as e:
         await message.answer(f"❌ Помилка: {e}")
+
 # ========== обробник для кнопки "Видалити" ==========
 @dp.callback_query(lambda c: c.data.startswith("del_"))
 async def delete_product_callback(callback: types.CallbackQuery):
@@ -1068,6 +1113,26 @@ async def pin_bot_button(message: types.Message):
         await message.answer("✅ Повідомлення закріплено!")
     except Exception as e:
         await message.answer(f"❌ Помилка: {e}")
+
+@dp.message(Command("reset_db"))
+async def reset_database(message: types.Message):
+    # Перевірка, що команду виконав адмін
+    if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
+        await message.answer("⛔ Немає прав.")
+        return
+
+    try:
+        # Шлях до файлу бази даних
+        db_path = "shop.db"
+        
+        # Перевіряємо, чи існує файл
+        if os.path.exists(db_path):
+            os.remove(db_path)
+            await message.answer("✅ Файл `shop.db` успішно видалено. Перезапустіть бота, щоб створити нову базу.", parse_mode="Markdown")
+        else:
+            await message.answer("❌ Файл `shop.db` не знайдено.")
+    except Exception as e:
+        await message.answer(f"❌ Сталася помилка: {e}")
 
 # ========== ВСІ РОЗМІРИ ==========
 @dp.callback_query(lambda c: c.data == "show_all_sizes")
