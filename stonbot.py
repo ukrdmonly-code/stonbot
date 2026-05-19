@@ -909,17 +909,12 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
         else:
             admin_to_notify = WOMAN_ADMIN_ID
         
-        # items_with_links вже має правильне форматування з бази
-        items_with_links_raw = order[7]
-        # Якщо в тексті вже є зворотні слеші - не екрануємо ще раз
-        if '\\' in items_with_links_raw:
-            items_with_links_escaped = items_with_links_raw
-        else:
-            items_with_links_escaped = escape_markdown(items_with_links_raw)
+        # Видаляємо всі зворотні слеші з тексту
+        items_with_links_fixed = order[7].replace('\\', '')
         
         admin_text = (
             f"✅ **ОПЛАЧЕНО ЗАМОВЛЕННЯ #{order_number}**\n\n"
-            f"👤 Клієнт: @{escape_markdown(message.from_user.username if message.from_user.username else message.from_user.full_name)}\n"
+            f"👤 Клієнт: @{message.from_user.username if message.from_user.username else message.from_user.full_name}\n"
             f"🆔 ID: {message.from_user.id}\n"
             f"📞 Телефон: {order[1]}\n"
             f"🏙️ Місто: {order[2]}\n"
@@ -928,7 +923,7 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
             f"💰 Оригінальна сума: {order[5]:.2f} грн\n"
             f"🎁 Знижка: {order[6]:.2f} грн\n"
             f"⚧️ Стать замовлення: {order[8]}\n\n"
-            f"📦 **Товари:**\n{items_with_links_escaped}\n\n"
+            f"📦 **Товари:**\n{items_with_links_fixed}\n\n"
             f"🚀 **Статус: оплата підтверджена! Відправляйте замовлення.**"
         )
         
