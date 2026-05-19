@@ -839,7 +839,7 @@ async def final_confirm_order(callback: types.CallbackQuery, state: FSMContext):
     admin_text = (
         f"🆕 **НОВЕ ЗАМОВЛЕННЯ #{order_number}**\n\n"
         f"👤 Клієнт: {data['user_name']}\n"
-        f"🆔 ID: {user_id}\n"
+        f"🆔 ID: [{user_id}](tg://user?id={user_id})\n"
         f"📞 Телефон: {data['user_phone']}\n"
         f"🏙️ Місто: {data['user_city']}\n"
         f"🏢 Відділення НП: {data['user_department']}\n"
@@ -915,7 +915,7 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
         admin_text = (
             f"✅ **ОПЛАЧЕНО ЗАМОВЛЕННЯ #{order_number}**\n\n"
             f"👤 Клієнт: @{message.from_user.username if message.from_user.username else message.from_user.full_name}\n"
-            f"🆔 ID: {message.from_user.id}\n"
+            f"🆔 ID: [{message.from_user.id}](tg://user?id={message.from_user.id})\n"
             f"📞 Телефон: {order[1]}\n"
             f"🏙️ Місто: {order[2]}\n"
             f"🏢 Відділення НП: {order[3]}\n"
