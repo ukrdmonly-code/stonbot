@@ -36,6 +36,13 @@ WOMAN_ADMIN_ID = 8813891468
 # Знижка при онлайн-оплаті (%)
 DISCOUNT_PERCENT = 5
 
+def escape_markdown(text: str) -> str:
+    """Екранує спеціальні символи для Markdown"""
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, '\\' + char)
+    return text
+
 # Категорії (без сезонів, сезони будуть окремо)
 CATEGORIES_BY_GENDER = {
     "чоловік": {
@@ -482,7 +489,8 @@ async def show_cart(callback_or_message, user_id: int, edit: bool = False):
     for item in cart_items:
         product_id, msg_id, group_id, name, size, price, qty = item
         post_link = f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
-        text += f"📦 [{name}]({post_link}) (Розмір: {size}) x{qty} = {price * qty} грн\n"
+        escaped_name = escape_markdown(name)
+        text += f"📦 [{escaped_name}]({post_link}) (Розмір: {size}) x{qty} = {price * qty} грн\n"
     text += f"\n💰 **Загальна сума: {total:.2f} грн**"
     if discount > 0:
         text += f"\n🎁 **Ваша знижка (-{DISCOUNT_PERCENT}%): {discount:.2f} грн**"
@@ -492,8 +500,9 @@ async def show_cart(callback_or_message, user_id: int, edit: bool = False):
     keyboard_buttons = []
     for item in cart_items:
         product_id, msg_id, group_id, name, size, price, qty = item
+        escaped_name = escape_markdown(name)
         keyboard_buttons.append([
-            InlineKeyboardButton(text=f"❌ Видалити {name} ({size})", callback_data=f"remove_cart_{product_id}_{size}")
+            InlineKeyboardButton(text=f"❌ Видалити {escaped_name} ({size})", callback_data=f"remove_cart_{product_id}_{size}")
         ])
     keyboard_buttons.append([InlineKeyboardButton(text="📦 Оформити замовлення", callback_data="checkout")])
     keyboard_buttons.append([InlineKeyboardButton(text="🗑 Очистити кошик", callback_data="clear_cart")])
@@ -696,8 +705,9 @@ async def process_department(message: types.Message, state: FSMContext):
     for item in cart_items:
         product_id, msg_id, group_id, name, size, price, qty = item
         post_link = f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
+        escaped_name = escape_markdown(name)
         items_list.append(f"{name} (розмір {size}) x{qty} = {price * qty} грн")
-        items_with_links.append(f"[{name}]({post_link}) (розмір {size}) x{qty} = {price * qty} грн")
+        items_with_links.append(f"[{escaped_name}]({post_link}) (розмір {size}) x{qty} = {price * qty} грн")
     
     items_text = "\n".join(items_list)
     
@@ -796,9 +806,10 @@ async def final_confirm_order(callback: types.CallbackQuery, state: FSMContext):
     
     for item in cart_items:
         product_id, msg_id, group_id, name, size, price, qty = item
-        items_list.append(f"{name} (розмір {size}) x{qty} = {price * qty} грн")
         post_link = f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
-        items_with_links.append(f"[{name}]({post_link}) (розмір {size}) x{qty} = {price * qty} грн")
+        escaped_name = escape_markdown(name)
+        items_list.append(f"{name} (розмір {size}) x{qty} = {price * qty} грн")
+        items_with_links.append(f"[{escaped_name}]({post_link}) (розмір {size}) x{qty} = {price * qty} грн")
     
     items_text = "\n".join(items_list)
     items_with_links_text = "\n".join(items_with_links)
@@ -898,9 +909,12 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
         else:
             admin_to_notify = WOMAN_ADMIN_ID
         
+        # Екрануємо спеціальні символи в items_with_links
+        items_with_links_escaped = escape_markdown(order[7])
+        
         admin_text = (
             f"✅ **ОПЛАЧЕНО ЗАМОВЛЕННЯ #{order_number}**\n\n"
-            f"👤 Клієнт: @{message.from_user.username if message.from_user.username else message.from_user.full_name}\n"
+            f"👤 Клієнт: @{escape_markdown(message.from_user.username if message.from_user.username else message.from_user.full_name)}\n"
             f"🆔 ID: {message.from_user.id}\n"
             f"📞 Телефон: {order[1]}\n"
             f"🏙️ Місто: {order[2]}\n"
@@ -909,7 +923,7 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
             f"💰 Оригінальна сума: {order[5]:.2f} грн\n"
             f"🎁 Знижка: {order[6]:.2f} грн\n"
             f"⚧️ Стать замовлення: {order[8]}\n\n"
-            f"📦 **Товари:**\n{order[7]}\n\n"
+            f"📦 **Товари:**\n{items_with_links_escaped}\n\n"
             f"🚀 **Статус: оплата підтверджена! Відправляйте замовлення.**"
         )
         
@@ -1315,10 +1329,11 @@ async def show_products_list(callback: types.CallbackQuery, size: str, gender: s
         price_text = f" - {price} грн" if price > 0 else ""
         short_name = (text[:35] + "..") if len(text) > 35 else text
         short_name = short_name.replace("\n", " ").replace("_", " ").strip()
+        escaped_name = escape_markdown(short_name)
         
         # Кнопка з посиланням на товар
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text=f"📦 {short_name}{price_text}", url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}")
+            InlineKeyboardButton(text=f"📦 {escaped_name}{price_text}", url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}")
         ])
         
         # Рядок з кнопками дій
