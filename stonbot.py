@@ -424,7 +424,7 @@ def generate_order_number():
 
 async def get_main_menu_keyboard(gender: str = None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Всі розміри", callback_data="show_all_sizes")],
+        [InlineKeyboardButton(text="🔍 Загальний пошук", callback_data="show_all_sizes")],
         [InlineKeyboardButton(text="📂 Детальний пошук", callback_data="show_categories")],
         [InlineKeyboardButton(text="🛒 Кошик", callback_data="show_cart"),
          InlineKeyboardButton(text="🔄 Змінити стать", callback_data="change_gender")],
