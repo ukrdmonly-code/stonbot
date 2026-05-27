@@ -17,7 +17,7 @@ from aiohttp import web
 import aiohttp
 
 # ========== НАЛАШТУВАННЯ ==========
-TOKEN = "8394512581:AAED1pOf6ZPPgXQ_pKUiq_oVY46eo1cVMgE"
+TOKEN = "8394512581:AAFCN9H3dhHPOG1a0KI1LJ5Uvb6CcnHcLMc"
 
 # Ім'я вашого JSON-файлу
 GOOGLE_CREDS_FILE = "google-creds.json"
