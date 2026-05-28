@@ -434,6 +434,11 @@ async def get_main_menu_keyboard(gender: str = None):
         [InlineKeyboardButton(text="ℹ️ Допомога", callback_data="help")]
     ])
 
+# ========== ТЕСТОВА КОМАНДА ==========
+@dp.message(Command("test"))
+async def test_cmd(message: types.Message):
+    await message.answer(f"✅ Тест працює! Твій ID: {message.from_user.id}")
+
 async def safe_send_new_message(callback, text, reply_markup=None):
     try:
         await callback.message.delete()
