@@ -1056,7 +1056,8 @@ async def admin_info(message: types.Message):
         "• **Формат ціни:** `ціна: 850 грн` або `850 грн`\n"
     )
     
-    await message.answer(text, parse_mode="Markdown")
+    escaped_text = escape_markdown(text)
+await message.answer(escaped_text, parse_mode="Markdown")
 
 # ========== ТИМЧАСОВА КОМАНДА ДЛЯ ДІАГНОСТИКИ ==========
 @dp.message(Command("test_season"))
