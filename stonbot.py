@@ -1732,10 +1732,25 @@ async def start_http_server():
     logger.info(f"🌐 HTTP сервер на порту {PORT}")
 
 async def main():
+    # Видаляємо старий webhook і скидаємо всі pending updates
+    await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("✅ Старий webhook видалено, pending updates скинуто")
+    
+    # Запускаємо HTTP сервер для health checks
     await start_http_server()
+    
+    # Запускаємо самопінг (щоб Render не засинав)
     asyncio.create_task(ping_self())
+    
     logger.info("🤖 Бот запущено!")
-    await dp.start_polling(bot)
+    
+    try:
+        # Запускаємо polling
+        await dp.start_polling(bot)
+    finally:
+        # Коректно закриваємо сесію при зупинці
+        await bot.session.close()
+        logger.info("🛑 Бот зупинено, сесію закрито")
 
 if __name__ == "__main__":
     asyncio.run(main())
