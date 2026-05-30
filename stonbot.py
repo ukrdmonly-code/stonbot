@@ -1689,13 +1689,16 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
     result_text += f"📄 Сторінка {page+1} з {total_pages}\n"
     result_text += f"📦 Знайдено: {total} товарів\n\n"
     
+    # Створюємо клавіатуру з кнопками
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    
     for p in products_page:
         msg_id = p.get('message_id')
         text = p.get('text', '')
         price = extract_price(text)
         price_text = f"{price:.0f} грн" if price > 0 else "ціна не вказана"
         
-        # Назва товару
+        # Назва товару (для тексту)
         name = text[:40].replace("\n", " ").strip()
         if len(text) > 40:
             name += "..."
@@ -1707,7 +1710,16 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
             sizes_clean = sizes_raw.strip(',').replace(',', ', ')
             sizes_text = f" [Розміри: {sizes_clean}]"
         
+        # Додаємо текстовий рядок з товаром
         result_text += f"• [{name}](https://t.me/c/{str(group_id)[4:]}/{msg_id}){sizes_text} — {price_text}\n"
+        
+        # Додаємо кнопку "В кошик" під товаром
+        callback_data = f"add_{msg_id}_0_{price}"
+        if len(callback_data) > 60:
+            callback_data = f"add_{msg_id}_0"
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text=f"🛒 Додати в кошик: {name[:30]}", callback_data=callback_data)
+        ])
     
     # Кнопки навігації
     nav_buttons = []
@@ -1716,12 +1728,12 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
     if page < total_pages - 1:
         nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"search_page_{page+1}"))
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        nav_buttons if nav_buttons else [],
-        [InlineKeyboardButton(text="🛒 Перейти в кошик", callback_data="show_cart")],
-        [InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")],
-        [InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")]
-    ])
+    if nav_buttons:
+        keyboard.inline_keyboard.append(nav_buttons)
+    
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🛒 Перейти в кошик", callback_data="show_cart")])
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")])
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")])
     
     try:
         await message.answer(result_text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
