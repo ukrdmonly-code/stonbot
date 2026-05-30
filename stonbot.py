@@ -254,9 +254,18 @@ async def cmd_done_reviews(message: types.Message, state: FSMContext):
 
 REVIEWS_PER_PAGE = 10
 
-# Словник для зберігання ID повідомлень кожного користувача
-# {user_id: {'album_msg_id': int, 'text_msg_id': int, 'current_page': int, 'total_pages': int, 'reviews': list}}
-user_reviews_data = {}
+# Словник для зберігання ID повідомлень відгуків для кожного користувача
+user_review_messages = {}  # {user_id: [list_of_message_ids]}
+
+async def delete_user_review_messages(user_id: int, chat_id: int):
+    """Видаляє всі повідомлення з відгуками для користувача"""
+    if user_id in user_review_messages:
+        for msg_id in user_review_messages[user_id]:
+            try:
+                await bot.delete_message(chat_id, msg_id)
+            except:
+                pass
+        user_review_messages[user_id] = []
 
 @dp.callback_query(lambda c: c.data == "show_reviews")
 async def show_reviews(callback: types.CallbackQuery):
@@ -278,7 +287,10 @@ async def show_reviews(callback: types.CallbackQuery):
     
     total_pages = (len(reviews) + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
     
-    # Видаляємо старе повідомлення з кнопкою "Відгуки"
+    # Видаляємо всі старі повідомлення з відгуками
+    await delete_user_review_messages(user_id, chat_id)
+    
+    # Видаляємо повідомлення з якого натиснули кнопку
     try:
         await callback.message.delete()
     except:
@@ -289,7 +301,7 @@ async def show_reviews(callback: types.CallbackQuery):
     await callback.answer()
 
 async def show_reviews_page(chat_id: int, user_id: int, page: int, total_pages: int, reviews: list):
-    """Показує конкретну сторінку відгуків і видаляє попередню"""
+    """Показує конкретну сторінку відгуків"""
     start = page * REVIEWS_PER_PAGE
     end = min(start + REVIEWS_PER_PAGE, len(reviews))
     page_reviews = reviews[start:end]
@@ -297,21 +309,8 @@ async def show_reviews_page(chat_id: int, user_id: int, page: int, total_pages: 
     if not page_reviews:
         return
     
-    # Видаляємо попередні повідомлення (якщо вони є)
-    if user_id in user_reviews_data:
-        data = user_reviews_data[user_id]
-        # Видаляємо старий альбом
-        if 'album_msg_id' in data:
-            try:
-                await bot.delete_message(chat_id, data['album_msg_id'])
-            except:
-                pass
-        # Видаляємо старий текст з кнопками
-        if 'text_msg_id' in data:
-            try:
-                await bot.delete_message(chat_id, data['text_msg_id'])
-            except:
-                pass
+    # Видаляємо всі старі повідомлення перед показом нових
+    await delete_user_review_messages(user_id, chat_id)
     
     # Створюємо медіагрупу
     media_group = []
@@ -330,27 +329,23 @@ async def show_reviews_page(chat_id: int, user_id: int, page: int, total_pages: 
         [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
     ])
     
-    # Надсилаємо новий альбом
+    # Надсилаємо альбом
     sent_album = await bot.send_media_group(chat_id=chat_id, media=media_group)
-    album_msg_id = sent_album[0].message_id
+    album_msg_ids = [msg.message_id for msg in sent_album]
     
-    # Надсилаємо новий текст з кнопками
+    # Надсилаємо текст з кнопками
     sent_text = await bot.send_message(
         chat_id=chat_id,
         text=f"📸 **Відгуки покупців**\n📄 Сторінка {page+1} з {total_pages}",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
-    text_msg_id = sent_text.message_id
     
-    # Зберігаємо ID повідомлень для цього користувача
-    user_reviews_data[user_id] = {
-        'album_msg_id': album_msg_id,
-        'text_msg_id': text_msg_id,
-        'current_page': page,
-        'total_pages': total_pages,
-        'reviews': reviews
-    }
+    # Зберігаємо всі ID повідомлень
+    if user_id not in user_review_messages:
+        user_review_messages[user_id] = []
+    user_review_messages[user_id].extend(album_msg_ids)
+    user_review_messages[user_id].append(sent_text.message_id)
 
 @dp.callback_query(lambda c: c.data.startswith("reviews_page_"))
 async def reviews_pagination(callback: types.CallbackQuery):
@@ -359,35 +354,28 @@ async def reviews_pagination(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
     target_page = int(callback.data.split("_")[2])
     
-    # Отримуємо збережені дані
-    if user_id not in user_reviews_data:
-        # Якщо дані втрачені — починаємо заново
-        reviews = get_all_reviews()
-        if not reviews:
-            await callback.answer("❌ Немає відгуків")
-            return
-        total_pages = (len(reviews) + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
-        await show_reviews_page(chat_id, user_id, target_page, total_pages, reviews)
-        await callback.answer()
+    reviews = get_all_reviews()
+    if not reviews:
+        await callback.answer("❌ Немає відгуків")
         return
     
-    data = user_reviews_data[user_id]
-    reviews = data['reviews']
-    total_pages = data['total_pages']
+    total_pages = (len(reviews) + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
     
     if target_page < 0 or target_page >= total_pages:
         await callback.answer("Немає більше відгуків")
         return
     
-    # Показуємо нову сторінку (стара видалиться автоматично всередині функції)
-    await show_reviews_page(chat_id, user_id, target_page, total_pages, reviews)
+    # Видаляємо всі старі повідомлення
+    await delete_user_review_messages(user_id, chat_id)
     
-    # Видаляємо повідомлення з callback-кнопкою (щоб не залишалось)
+    # Видаляємо повідомлення з якого натиснули кнопку
     try:
         await callback.message.delete()
     except:
         pass
     
+    # Показуємо нову сторінку
+    await show_reviews_page(chat_id, user_id, target_page, total_pages, reviews)
     await callback.answer()
 # ========== НАЛАШТУВАННЯ GOOGLE SHEETS ==========
 def init_google_sheet():
@@ -843,21 +831,8 @@ async def back_to_main_menu(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
     
-    # Видаляємо повідомлення з відгуками, якщо вони є
-    if user_id in user_reviews_data:
-        data = user_reviews_data[user_id]
-        # Видаляємо альбом з фото
-        try:
-            await bot.delete_message(chat_id, data['album_msg_id'])
-        except:
-            pass
-        # Видаляємо текст з кнопками навігації
-        try:
-            await bot.delete_message(chat_id, data['text_msg_id'])
-        except:
-            pass
-        # Очищаємо кеш для цього користувача
-        del user_reviews_data[user_id]
+    # Видаляємо всі повідомлення з відгуками
+    await delete_user_review_messages(user_id, chat_id)
     
     # Показуємо головне меню
     data = await state.get_data()
