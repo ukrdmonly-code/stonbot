@@ -19,6 +19,9 @@ import aiohttp
 # Кеш для відгуків (зберігає ID повідомлень для кожного користувача)
 user_reviews_cache = {}
 
+# Кеш для зберігання статі користувача
+user_gender_cache = {}
+
 # ========== НАЛАШТУВАННЯ ==========
 TOKEN = "8394512581:AAFCN9H3dhHPOG1a0KI1LJ5Uvb6CcnHcLMc"
 
@@ -917,6 +920,13 @@ async def our_groups(callback: types.CallbackQuery):
 # ========== КОШИК (обробники) ==========
 @dp.callback_query(lambda c: c.data == "show_cart")
 async def show_cart_callback(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    
+    # Зберігаємо стать перед очищенням
+    data = await state.get_data()
+    gender = data.get("gender", "чоловік")
+    user_gender_cache[user_id] = gender
+    
     await state.clear()
     await show_cart(callback, callback.from_user.id, edit=True)
 
