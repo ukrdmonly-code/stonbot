@@ -22,6 +22,9 @@ user_reviews_cache = {}
 # Кеш для зберігання статі користувача
 user_gender_cache = {}
 
+# Зберігання ID повідомлень результатів пошуку для кожного користувача
+user_search_messages = {}  # {user_id: [list_of_message_ids]}
+
 # ========== НАЛАШТУВАННЯ ==========
 TOKEN = "8394512581:AAFCN9H3dhHPOG1a0KI1LJ5Uvb6CcnHcLMc"
 
@@ -269,6 +272,16 @@ async def delete_user_review_messages(user_id: int, chat_id: int):
             except:
                 pass
         user_review_messages[user_id] = []
+
+async def delete_user_search_messages(user_id: int, chat_id: int):
+    """Видаляє всі повідомлення з результатами пошуку для користувача"""
+    if user_id in user_search_messages:
+        for msg_id in user_search_messages[user_id]:
+            try:
+                await bot.delete_message(chat_id, msg_id)
+            except:
+                pass
+        user_search_messages[user_id] = []
 
 @dp.callback_query(lambda c: c.data == "show_reviews")
 async def show_reviews(callback: types.CallbackQuery):
@@ -864,6 +877,9 @@ async def back_to_main_menu(callback: types.CallbackQuery, state: FSMContext):
     
     # Видаляємо всі повідомлення з відгуками
     await delete_user_review_messages(user_id, chat_id)
+
+    # Видаляємо всі повідомлення з результатами пошуку
+    await delete_user_search_messages(user_id, chat_id)
     
     # Отримуємо стать з кешу (збережену при вході в кошик)
     gender = user_gender_cache.get(user_id)
@@ -1604,35 +1620,69 @@ async def search_by_name(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(OrderState.waiting_for_search_query)
 async def process_search_query(message: types.Message, state: FSMContext):
-    """Обробляє пошуковий запит і показує результати"""
+    """Обробляє пошуковий запит і показує результати (підтримує розміри)"""
     query = message.text.strip().lower()
     
     if not query:
         await message.answer("❌ Будь ласка, введіть слово для пошуку.")
         return
     
+    await message.answer(f"🔍 Шукаю **{query}**...", parse_mode="Markdown")
+    
     # Отримуємо стать користувача
     data = await state.get_data()
     gender = data.get("gender", "чоловік")
+    
+    # Розбираємо запит на ключові слова та розміри
+    words = query.split()
+    search_words = []
+    search_sizes = []
+    
+    # Список можливих розмірів
+    valid_sizes = ["xs", "s", "m", "l", "xl", "xxl", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47"]
+    
+    for word in words:
+        if word in valid_sizes:
+            search_sizes.append(word.upper())
+        else:
+            search_words.append(word)
     
     # Шукаємо товари
     all_products = get_all_products()
     found_products = []
     
     for p in all_products:
-        # Перевіряємо стать (якщо хочеш показувати тільки товари вибраної статі)
         if p.get('gender') != gender:
             continue
         
-        # Перевіряємо, чи товар не проданий
         text = p.get('text', '')
         if is_sold(text):
             delete_product_from_sheet(p.get('message_id'))
             continue
         
-        # Шукаємо ключове слово в тексті
-        if query in text.lower():
-            found_products.append(p)
+        # Перевіряємо ключові слова
+        text_lower = text.lower()
+        word_match = True
+        for word in search_words:
+            if word not in text_lower:
+                word_match = False
+                break
+        
+        if not word_match:
+            continue
+        
+        # Перевіряємо розміри (якщо вказані)
+        if search_sizes:
+            sizes_raw = p.get('sizes', '')
+            size_match = False
+            for size in search_sizes:
+                if f",{size}," in sizes_raw or sizes_raw == size or f",{size}" in sizes_raw or f"{size}," in sizes_raw:
+                    size_match = True
+                    break
+            if not size_match:
+                continue
+        
+        found_products.append(p)
     
     if not found_products:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1648,14 +1698,19 @@ async def process_search_query(message: types.Message, state: FSMContext):
         await state.clear()
         return
     
-    # Зберігаємо результати в state
+    # Зберігаємо результати
     await state.update_data(search_results=found_products, search_query=query, gender=gender)
     
-    # Показуємо першу сторінку результатів
+    # Показуємо першу сторінку
     await show_search_results(message, state, page=0)
 
 async def show_search_results(message: types.Message, state: FSMContext, page: int = 0):
     """Показує сторінку результатів пошуку (кожен товар окремим повідомленням)"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Видаляємо старі результати пошуку
+    await delete_user_search_messages(user_id, chat_id)
     
     data = await state.get_data()
     found_products = data.get('search_results', [])
@@ -1679,13 +1734,17 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
     end = min(start + ITEMS_PER_PAGE, total)
     products_page = found_products[start:end]
     
-    # Спочатку надсилаємо заголовок
-    await message.answer(
+    # Список ID надісланих повідомлень
+    sent_messages = []
+    
+    # Заголовок
+    header_msg = await message.answer(
         f"🔎 **Результати пошуку за запитом:** {query}\n"
         f"📄 Сторінка {page+1} з {total_pages}\n"
         f"📦 Знайдено: {total} товарів",
         parse_mode="Markdown"
     )
+    sent_messages.append(header_msg.message_id)
     
     # Надсилаємо КОЖЕН ТОВАР окремим повідомленням
     for idx, p in enumerate(products_page, 1):
@@ -1704,10 +1763,8 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
             sizes_clean = sizes_raw.strip(',').replace(',', ', ')
             sizes_text = f"\n📏 Розміри: {sizes_clean}"
         
-        # Текст товару
         product_text = f"📦 **{name}**{sizes_text}\n💰 {price_text}\n\n[🔗 Переглянути товар](https://t.me/c/{str(group_id)[4:]}/{msg_id})"
         
-        # Кнопка "В кошик"
         callback_data = f"add_{msg_id}_0_{price}"
         if len(callback_data) > 60:
             callback_data = f"add_{msg_id}_0"
@@ -1715,9 +1772,10 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
             [InlineKeyboardButton(text="🛒 Додати в кошик", callback_data=callback_data)]
         ])
         
-        await message.answer(product_text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
+        product_msg = await message.answer(product_text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
+        sent_messages.append(product_msg.message_id)
     
-    # Кнопки навігації внизу
+    # Кнопки навігації
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"search_page_{page-1}"))
@@ -1731,7 +1789,11 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
         [InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")]
     ])
     
-    await message.answer("📌 **Навігація**", reply_markup=keyboard, parse_mode="Markdown")
+    nav_msg = await message.answer("📌 **Навігація**", reply_markup=keyboard, parse_mode="Markdown")
+    sent_messages.append(nav_msg.message_id)
+    
+    # Зберігаємо ID повідомлень
+    user_search_messages[user_id] = sent_messages
     await state.clear()
 
 @dp.callback_query(lambda c: c.data.startswith("search_page_"))
