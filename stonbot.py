@@ -127,6 +127,204 @@ async def test_addphoto(message: types.Message):
     logger.info(f"🔥🔥🔥 TEST: отримано addphoto_test від {message.from_user.id}")
     await message.answer(f"✅ Тестова команда спрацювала! Твій ID: {message.from_user.id}")
 
+# ========== ВІДГУКИ (ПОВНИЙ КОД) ==========
+
+def init_reviews_worksheet():
+    """Ініціалізує аркуш reviews в Google Sheets"""
+    try:
+        if SHEET is None:
+            logger.error("Немає підключення до Google Sheets")
+            return None
+        
+        try:
+            reviews_ws = SHEET.worksheet("reviews")
+            logger.info("✅ Аркуш 'reviews' знайдено")
+        except gspread.WorksheetNotFound:
+            logger.info("Створюємо аркуш 'reviews'...")
+            reviews_ws = SHEET.add_worksheet(title="reviews", rows="1000", cols="3")
+            reviews_ws.append_row(["id", "file_id", "created_at"])
+            logger.info("Аркуш 'reviews' створено")
+        
+        return reviews_ws
+    except Exception as e:
+        logger.error(f"Помилка ініціалізації reviews: {e}")
+        return None
+
+REVIEWS_WORKSHEET = init_reviews_worksheet()
+
+def get_next_review_id():
+    """Отримує наступний ID для відгуку"""
+    if REVIEWS_WORKSHEET is None:
+        return 1
+    try:
+        records = REVIEWS_WORKSHEET.get_all_records()
+        if not records:
+            return 1
+        max_id = max([row.get('id', 0) for row in records])
+        return max_id + 1
+    except:
+        return 1
+
+def add_review_to_sheet(file_id: str):
+    """Додає file_id відгуку в Google Sheets"""
+    if REVIEWS_WORKSHEET is None:
+        logger.error("Аркуш reviews не доступний")
+        return False
+    try:
+        new_id = get_next_review_id()
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        REVIEWS_WORKSHEET.append_row([new_id, file_id, now])
+        logger.info(f"✅ Відгук додано: {file_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Помилка додавання відгуку: {e}")
+        return False
+
+def get_all_reviews():
+    """Отримує всі file_id відгуків з таблиці"""
+    if REVIEWS_WORKSHEET is None:
+        return []
+    try:
+        records = REVIEWS_WORKSHEET.get_all_records()
+        return [row.get('file_id') for row in records if row.get('file_id')]
+    except Exception as e:
+        logger.error(f"Помилка отримання відгуків: {e}")
+        return []
+
+# ========== КОМАНДА /addphoto ==========
+
+class ReviewState(StatesGroup):
+    waiting_for_photos = State()
+
+@dp.message(Command("addphoto"))
+async def cmd_addphoto(message: types.Message, state: FSMContext):
+    """Команда для адмінів: додати фото відгуків"""
+    logger.info(f"🔥 Отримано команду /addphoto від {message.from_user.id}")
+    
+    if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
+        await message.answer("⛔ Ця команда тільки для адміністраторів.")
+        return
+    
+    await state.set_state(ReviewState.waiting_for_photos)
+    await message.answer(
+        "📸 **Додавання відгуків**\n\n"
+        "Надішли мені **фото відгуків** (до 10 фото за раз).\n"
+        "Я автоматично збережу їх у таблицю.\n\n"
+        "Коли закінчиш — натисни /done",
+        parse_mode="Markdown"
+    )
+
+@dp.message(ReviewState.waiting_for_photos)
+async def process_review_photos(message: types.Message, state: FSMContext):
+    """Обробляє отримані фото від адміна"""
+    if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
+        return
+    
+    if message.text and message.text.startswith("/done"):
+        await state.clear()
+        await message.answer("✅ Додавання відгуків завершено!")
+        return
+    
+    if not message.photo:
+        await message.answer("❌ Будь ласка, надсилайте **фото** відгуків.\nАбо натисніть /done, щоб завершити.")
+        return
+    
+    file_id = message.photo[-1].file_id
+    
+    if add_review_to_sheet(file_id):
+        reviews = get_all_reviews()
+        await message.answer(f"✅ Відгук збережено! (Всього в базі: {len(reviews)})")
+    else:
+        await message.answer("❌ Помилка збереження. Перевірте Google Таблицю.")
+
+@dp.message(Command("done"))
+async def cmd_done_reviews(message: types.Message, state: FSMContext):
+    """Завершує додавання відгуків"""
+    current_state = await state.get_state()
+    if current_state == ReviewState.waiting_for_photos.state:
+        await state.clear()
+        await message.answer("✅ Додавання відгуків завершено!")
+    else:
+        await message.answer("❌ Ви не в режимі додавання відгуків. Використайте /addphoto")
+
+# ========== ПОКАЗ ВІДГУКІВ (КАРУСЕЛЬ) ==========
+
+REVIEWS_PER_PAGE = 10
+
+@dp.callback_query(lambda c: c.data == "show_reviews")
+async def show_reviews(callback: types.CallbackQuery):
+    """Показує першу сторінку відгуків"""
+    reviews = get_all_reviews()
+    
+    if not reviews:
+        await callback.message.edit_text(
+            "📸 **Відгуки**\n\nПоки що немає жодного відгуку.\nБудьте першими! 🎉",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")]
+            ]),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+        return
+    
+    total = len(reviews)
+    total_pages = (total + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
+    
+    await show_reviews_page(callback, page=0, total_pages=total_pages, reviews=reviews)
+    await callback.answer()
+
+async def show_reviews_page(callback: types.CallbackQuery, page: int, total_pages: int, reviews: list):
+    """Показує конкретну сторінку відгуків"""
+    start = page * REVIEWS_PER_PAGE
+    end = min(start + REVIEWS_PER_PAGE, len(reviews))
+    page_reviews = reviews[start:end]
+    
+    if not page_reviews:
+        await callback.answer("❌ Немає відгуків на цій сторінці")
+        return
+    
+    media_group = []
+    for file_id in page_reviews:
+        media_group.append(types.InputMediaPhoto(media=file_id))
+    
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"reviews_page_{page-1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"reviews_page_{page+1}"))
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        nav_buttons if nav_buttons else [],
+        [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
+    ])
+    
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    await callback.message.answer_media_group(media=media_group)
+    await callback.message.answer(
+        f"📸 **Відгуки покупців**\n📄 Сторінка {page+1} з {total_pages}",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+@dp.callback_query(lambda c: c.data.startswith("reviews_page_"))
+async def reviews_pagination(callback: types.CallbackQuery):
+    """Обробляє пагінацію відгуків"""
+    page = int(callback.data.split("_")[2])
+    reviews = get_all_reviews()
+    total = len(reviews)
+    total_pages = (total + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
+    
+    if page < 0 or page >= total_pages:
+        await callback.answer("Немає більше відгуків")
+        return
+    
+    await show_reviews_page(callback, page, total_pages, reviews)
+    await callback.answer()
+
 # ========== НАЛАШТУВАННЯ GOOGLE SHEETS ==========
 def init_google_sheet():
     """Підключається до Google Sheets через JSON-файл або змінну середовища"""
@@ -1512,209 +1710,7 @@ async def catch_edited_post(message: types.Message):
     update_product_in_sheet(message.message_id, full_text, sizes_str, gender, category, season)
     logger.info(f"🔄 Оновлено після редагування: {message.message_id}")
 
-# ========== ФУНКЦІЇ ДЛЯ ВІДГУКІВ (REVIEWS) ==========
 
-def init_reviews_worksheet():
-    """Ініціалізує аркуш reviews в Google Sheets"""
-    try:
-        if SHEET is None:
-            logger.error("Немає підключення до Google Sheets")
-            return None
-        
-        try:
-            reviews_ws = SHEET.worksheet("reviews")
-            logger.info("✅ Аркуш 'reviews' знайдено")
-        except gspread.WorksheetNotFound:
-            logger.info("Створюємо аркуш 'reviews'...")
-            reviews_ws = SHEET.add_worksheet(title="reviews", rows="1000", cols="3")
-            reviews_ws.append_row(["id", "file_id", "created_at"])
-            logger.info("Аркуш 'reviews' створено")
-        
-        return reviews_ws
-    except Exception as e:
-        logger.error(f"Помилка ініціалізації reviews: {e}")
-        return None
-
-# Отримуємо доступ до аркуша reviews
-REVIEWS_WORKSHEET = init_reviews_worksheet()
-
-def get_next_review_id():
-    """Отримує наступний ID для відгуку"""
-    if REVIEWS_WORKSHEET is None:
-        return 1
-    try:
-        records = REVIEWS_WORKSHEET.get_all_records()
-        if not records:
-            return 1
-        max_id = max([row.get('id', 0) for row in records])
-        return max_id + 1
-    except:
-        return 1
-
-def add_review_to_sheet(file_id: str):
-    """Додає file_id відгуку в Google Sheets"""
-    if REVIEWS_WORKSHEET is None:
-        logger.error("Аркуш reviews не доступний")
-        return False
-    try:
-        new_id = get_next_review_id()
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        REVIEWS_WORKSHEET.append_row([new_id, file_id, now])
-        logger.info(f"✅ Відгук додано: {file_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Помилка додавання відгуку: {e}")
-        return False
-
-def get_all_reviews():
-    """Отримує всі file_id відгуків з таблиці"""
-    if REVIEWS_WORKSHEET is None:
-        return []
-    try:
-        records = REVIEWS_WORKSHEET.get_all_records()
-        return [row.get('file_id') for row in records if row.get('file_id')]
-    except Exception as e:
-        logger.error(f"Помилка отримання відгуків: {e}")
-        return []
-
-# ========== КОМАНДА /addphoto ДЛЯ АДМІНІВ ==========
-
-# Стан для очікування фото
-class ReviewState(StatesGroup):
-    waiting_for_photos = State()
-
-@dp.message(Command("addphoto"))
-async def cmd_addphoto(message: types.Message, state: FSMContext):
-    """Команда для адмінів: додати фото відгуків"""
-
-    # ДОДАЙ ЦЕЙ РЯДОК ДЛЯ ЛОГУВАННЯ
-    logger.info(f"🔥 Отримано команду /addphoto від {message.from_user.id}")
-    
-    if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
-        await message.answer("⛔ Ця команда тільки для адміністраторів.")
-        return
-    
-    await state.set_state(ReviewState.waiting_for_photos)
-    await message.answer(
-        "📸 **Додавання відгуків**\n\n"
-        "Надішли мені **фото відгуків** (до 10 фото за раз).\n"
-        "Я автоматично збережу їх у таблицю.\n\n"
-        "Коли закінчиш — натисни /done",
-        parse_mode="Markdown"
-    )
-
-@dp.message(ReviewState.waiting_for_photos)
-async def process_review_photos(message: types.Message, state: FSMContext):
-    """Обробляє отримані фото від адміна"""
-    if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
-        return
-    
-    if message.text and message.text.startswith("/done"):
-        await state.clear()
-        await message.answer("✅ Додавання відгуків завершено!")
-        return
-    
-    if not message.photo:
-        await message.answer("❌ Будь ласка, надсилайте **фото** відгуків.\nАбо натисніть /done, щоб завершити.")
-        return
-    
-    # Отримуємо file_id найбільшого фото
-    file_id = message.photo[-1].file_id
-    
-    # Зберігаємо в Google Sheets
-    if add_review_to_sheet(file_id):
-        reviews = get_all_reviews()
-        await message.answer(f"✅ Відгук збережено! (Всього в базі: {len(reviews)})")
-    else:
-        await message.answer("❌ Помилка збереження. Перевірте Google Таблицю.")
-
-@dp.message(Command("done"))
-async def cmd_done_reviews(message: types.Message, state: FSMContext):
-    """Завершує додавання відгуків"""
-    current_state = await state.get_state()
-    if current_state == ReviewState.waiting_for_photos.state:
-        await state.clear()
-        await message.answer("✅ Додавання відгуків завершено!")
-    else:
-        await message.answer("❌ Ви не в режимі додавання відгуків. Використайте /addphoto")
-
-# ========== ПОКАЗ ВІДГУКІВ (КАРУСЕЛЬ) ==========
-
-REVIEWS_PER_PAGE = 10
-
-@dp.callback_query(lambda c: c.data == "show_reviews")
-async def show_reviews(callback: types.CallbackQuery):
-    """Показує першу сторінку відгуків"""
-    reviews = get_all_reviews()
-    
-    if not reviews:
-        await callback.message.edit_text(
-            "📸 **Відгуки**\n\nПоки що немає жодного відгуку.\nБудьте першими! 🎉",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")]
-            ]),
-            parse_mode="Markdown"
-        )
-        await callback.answer()
-        return
-    
-    total = len(reviews)
-    total_pages = (total + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
-    
-    await show_reviews_page(callback, page=0, total_pages=total_pages, reviews=reviews)
-    await callback.answer()
-
-async def show_reviews_page(callback: types.CallbackQuery, page: int, total_pages: int, reviews: list):
-    """Показує конкретну сторінку відгуків"""
-    start = page * REVIEWS_PER_PAGE
-    end = min(start + REVIEWS_PER_PAGE, len(reviews))
-    page_reviews = reviews[start:end]
-    
-    if not page_reviews:
-        await callback.answer("❌ Немає відгуків на цій сторінці")
-        return
-    
-    media_group = []
-    for file_id in page_reviews:
-        media_group.append(types.InputMediaPhoto(media=file_id))
-    
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"reviews_page_{page-1}"))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"reviews_page_{page+1}"))
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        nav_buttons if nav_buttons else [],
-        [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
-    ])
-    
-    try:
-        await callback.message.delete()
-    except:
-        pass
-    
-    await callback.message.answer_media_group(media=media_group)
-    await callback.message.answer(
-        f"📸 **Відгуки покупців**\n📄 Сторінка {page+1} з {total_pages}",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-
-@dp.callback_query(lambda c: c.data.startswith("reviews_page_"))
-async def reviews_pagination(callback: types.CallbackQuery):
-    """Обробляє пагінацію відгуків"""
-    page = int(callback.data.split("_")[2])
-    reviews = get_all_reviews()
-    total = len(reviews)
-    total_pages = (total + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
-    
-    if page < 0 or page >= total_pages:
-        await callback.answer("Немає більше відгуків")
-        return
-    
-    await show_reviews_page(callback, page, total_pages, reviews)
-    await callback.answer()
 
 # ========== HTTP СЕРВЕР ==========
 async def health_check(request):
