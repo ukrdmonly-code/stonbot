@@ -131,6 +131,7 @@ async def test_addphoto(message: types.Message):
 
 def init_reviews_worksheet():
     """Ініціалізує аркуш reviews в Google Sheets"""
+    global SHEET  # ДОДАЙ ЦЕЙ РЯДОК
     try:
         if SHEET is None:
             logger.error("Немає підключення до Google Sheets")
@@ -150,7 +151,6 @@ def init_reviews_worksheet():
         logger.error(f"Помилка ініціалізації reviews: {e}")
         return None
 
-REVIEWS_WORKSHEET = init_reviews_worksheet()
 
 def get_next_review_id():
     """Отримує наступний ID для відгуку"""
@@ -376,6 +376,9 @@ if WORKSHEET is None:
         def update_cell(self, row, col, value): pass
         def delete_rows(self, row): pass
     WORKSHEET = FakeWorksheet()
+
+# Ініціалізуємо аркуш для відгуків ПІСЛЯ того, як SHEET створено
+REVIEWS_WORKSHEET = init_reviews_worksheet()
 
 # ========== ФУНКЦІЇ GOOGLE SHEETS ==========
 def get_next_id():
