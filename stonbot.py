@@ -1679,27 +1679,34 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     
-    for p in products_page:
-        msg_id = p.get('message_id')
-        text = p.get('text', '')
-        price = extract_price(text)
-        price_text = f" - {price} грн" if price > 0 else ""
-        short_name = (text[:35] + "..") if len(text) > 35 else text
-        short_name = short_name.replace("\n", " ").replace("_", " ").strip()
-        escaped_name = escape_markdown(short_name)
-        
-        # Кнопка з посиланням на товар
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text=f"📦 {escaped_name}{price_text}", url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}")
-        ])
-        
-        # Кнопка "В кошик"
-        callback_data = f"add_{msg_id}_0_{price}"
-        if len(callback_data) > 60:
-            callback_data = f"add_{msg_id}_0"
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🛒 В кошик", callback_data=callback_data)
-        ])
+for p in products_page:
+    msg_id = p.get('message_id')
+    text = p.get('text', '')
+    price = extract_price(text)
+    price_text = f" - {price} грн" if price > 0 else ""
+    short_name = (text[:35] + "..") if len(text) > 35 else text
+    short_name = short_name.replace("\n", " ").replace("_", " ").strip()
+    escaped_name = escape_markdown(short_name)
+    
+    # Отримуємо розміри
+    sizes = p.get('sizes', '')
+    sizes_text = ""
+    if sizes:
+        sizes_clean = sizes.strip(',').replace(',', ', ')
+        sizes_text = f" [{sizes_clean}]"
+    
+    # Кнопка з посиланням на товар (з розмірами)
+    keyboard.inline_keyboard.append([
+        InlineKeyboardButton(text=f"📦 {escaped_name}{sizes_text}{price_text}", url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}")
+    ])
+    
+    # Кнопка "В кошик"
+    callback_data = f"add_{msg_id}_0_{price}"
+    if len(callback_data) > 60:
+        callback_data = f"add_{msg_id}_0"
+    keyboard.inline_keyboard.append([
+        InlineKeyboardButton(text="🛒 В кошик", callback_data=callback_data)
+    ])
     
     # Кнопки навігації
     nav_buttons = []
