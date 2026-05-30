@@ -113,6 +113,12 @@ ITEMS_PER_PAGE = 20
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ========== ТЕСТОВА КОМАНДА ДЛЯ ДІАГНОСТИКИ ==========
+@dp.message(Command("addphoto_test"))
+async def test_addphoto(message: types.Message):
+    logger.info(f"🔥🔥🔥 TEST: отримано addphoto_test від {message.from_user.id}")
+    await message.answer(f"✅ Тестова команда спрацювала! Твій ID: {message.from_user.id}")
+
 PORT = int(os.environ.get("PORT", 10000))
 RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
 KEEP_ALIVE_URL = RENDER_URL.rstrip("/") + "/health" if RENDER_URL else None
@@ -1580,6 +1586,10 @@ class ReviewState(StatesGroup):
 @dp.message(Command("addphoto"))
 async def cmd_addphoto(message: types.Message, state: FSMContext):
     """Команда для адмінів: додати фото відгуків"""
+
+    # ДОДАЙ ЦЕЙ РЯДОК ДЛЯ ЛОГУВАННЯ
+    logger.info(f"🔥 Отримано команду /addphoto від {message.from_user.id}")
+    
     if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
         await message.answer("⛔ Ця команда тільки для адміністраторів.")
         return
