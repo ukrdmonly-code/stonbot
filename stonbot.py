@@ -381,192 +381,6 @@ async def reviews_pagination(callback: types.CallbackQuery):
     await show_reviews_page(chat_id, user_id, target_page, total_pages, reviews)
     await callback.answer()
 
-# ========== ПОШУК ПО НАЗВІ ТОВАРУ ==========
-
-@dp.callback_query(lambda c: c.data == "search_by_name")
-async def search_by_name(callback: types.CallbackQuery, state: FSMContext):
-    """Запускає пошук по назві товару"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Завершити пошук", callback_data="cancel_search")]
-    ])
-    
-    await callback.message.edit_text(
-        "🔎 **Пошук по назві товару**\n\n"
-        "Введіть назву бренду або ключове слово для пошуку.\n"
-        "Наприклад: **Puma**, **Nike**, **Adidas**, **кросівки**, **куртка**\n\n"
-        "Або натисніть кнопку 'Завершити пошук', щоб повернутися в меню.",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-    await state.set_state(OrderState.waiting_for_search_query)
-    await callback.answer()
-
-@dp.message(OrderState.waiting_for_search_query)
-async def process_search_query(message: types.Message, state: FSMContext):
-    """Обробляє пошуковий запит і показує результати"""
-    query = message.text.strip().lower()
-    
-    if not query:
-        await message.answer("❌ Будь ласка, введіть слово для пошуку.")
-        return
-    
-    # Отримуємо стать користувача
-    data = await state.get_data()
-    gender = data.get("gender", "чоловік")
-    
-    # Шукаємо товари
-    all_products = get_all_products()
-    found_products = []
-    
-    for p in all_products:
-        # Перевіряємо стать (якщо хочеш показувати тільки товари вибраної статі)
-        if p.get('gender') != gender:
-            continue
-        
-        # Перевіряємо, чи товар не проданий
-        text = p.get('text', '')
-        if is_sold(text):
-            delete_product_from_sheet(p.get('message_id'))
-            continue
-        
-        # Шукаємо ключове слово в тексті
-        if query in text.lower():
-            found_products.append(p)
-    
-    if not found_products:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")],
-            [InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")]
-        ])
-        await message.answer(
-            f"😕 Нічого не знайдено за запитом **{message.text}**\n\n"
-            f"Спробуйте інше ключове слово або перевірте написання.",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-        await state.clear()
-        return
-    
-    # Зберігаємо результати в state
-    await state.update_data(search_results=found_products, search_query=query, gender=gender)
-    
-    # Показуємо першу сторінку результатів
-    await show_search_results(message, state, page=0)
-
-async def show_search_results(message: types.Message, state: FSMContext, page: int = 0):
-    """Показує сторінку результатів пошуку"""
-    data = await state.get_data()
-    found_products = data.get('search_results', [])
-    query = data.get('search_query', '')
-    gender = data.get('gender', 'чоловік')
-    
-    if not found_products:
-        return
-    
-    group_id = GROUPS.get(gender)
-    if not group_id:
-        await message.answer("❌ Помилка: не знайдено групу для цієї статі")
-        return
-    
-    ITEMS_PER_PAGE_SEARCH = 10
-    total = len(found_products)
-    total_pages = (total + ITEMS_PER_PAGE_SEARCH - 1) // ITEMS_PER_PAGE_SEARCH
-    page = max(0, min(page, total_pages - 1))
-    start = page * ITEMS_PER_PAGE_SEARCH
-    end = min(start + ITEMS_PER_PAGE_SEARCH, total)
-    products_page = found_products[start:end]
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
-    
-    for p in products_page:
-        msg_id = p.get('message_id')
-        text = p.get('text', '')
-        price = extract_price(text)
-        price_text = f" - {price} грн" if price > 0 else ""
-        short_name = (text[:35] + "..") if len(text) > 35 else text
-        short_name = short_name.replace("\n", " ").replace("_", " ").strip()
-        escaped_name = escape_markdown(short_name)
-        
-        # Кнопка з посиланням на товар
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text=f"📦 {escaped_name}{price_text}", url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}")
-        ])
-        
-        # Кнопка "В кошик"
-        callback_data = f"add_{msg_id}_0_{price}"
-        if len(callback_data) > 60:
-            callback_data = f"add_{msg_id}_0"
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🛒 В кошик", callback_data=callback_data)
-        ])
-    
-    # Кнопки навігації
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"search_page_{page-1}"))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"search_page_{page+1}"))
-    
-    if nav_buttons:
-        keyboard.inline_keyboard.append(nav_buttons)
-    
-    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")])
-    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")])
-    keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Завершити пошук", callback_data="cancel_search")])
-    
-    await message.answer(
-        f"🔎 **Результати пошуку за запитом:** {query}\n"
-        f"📄 Сторінка {page+1} з {total_pages}\n"
-        f"📦 Знайдено: {total} товарів",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-    
-    # Очищаємо стан після показу результатів
-    await state.clear()
-
-@dp.callback_query(lambda c: c.data.startswith("search_page_"))
-async def search_pagination(callback: types.CallbackQuery, state: FSMContext):
-    """Пагінація результатів пошуку"""
-    page = int(callback.data.split("_")[2])
-    
-    # Отримуємо збережені результати (доведеться перечитати, бо state очищено)
-    query = callback.message.text.split("за запитом:")[1].split("\n")[0].strip() if "за запитом:" in callback.message.text else ""
-    
-    if query:
-        # Якщо є запит, шукаємо заново
-        all_products = get_all_products()
-        found_products = []
-        
-        for p in all_products:
-            text = p.get('text', '')
-            if query.lower() in text.lower():
-                if not is_sold(text):
-                    found_products.append(p)
-        
-        if found_products:
-            await state.update_data(search_results=found_products, search_query=query)
-            await show_search_results(callback.message, state, page)
-    
-    await callback.answer()
-
-@dp.callback_query(lambda c: c.data == "cancel_search")
-async def cancel_search_button(callback: types.CallbackQuery, state: FSMContext):
-    """Завершує пошук і повертає в головне меню"""
-    await state.clear()
-    
-    # Отримуємо стать з кешу
-    user_id = callback.from_user.id
-    gender = user_gender_cache.get(user_id, "чоловік")
-    
-    keyboard = await get_main_menu_keyboard(gender)
-    
-    await callback.message.edit_text(
-        f"👋 Вибрана стать: {gender}\n\n🏠 Головне меню:",
-        reply_markup=keyboard
-    )
-    await callback.answer()
-
 # ========== НАЛАШТУВАННЯ GOOGLE SHEETS ==========
 def init_google_sheet():
     """Підключається до Google Sheets через JSON-файл або змінну середовища"""
@@ -1767,6 +1581,192 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
         return
     
     await state.clear()
+
+# ========== ПОШУК ПО НАЗВІ ТОВАРУ ==========
+
+@dp.callback_query(lambda c: c.data == "search_by_name")
+async def search_by_name(callback: types.CallbackQuery, state: FSMContext):
+    """Запускає пошук по назві товару"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Завершити пошук", callback_data="cancel_search")]
+    ])
+    
+    await callback.message.edit_text(
+        "🔎 **Пошук по назві товару**\n\n"
+        "Введіть назву бренду або ключове слово для пошуку.\n"
+        "Наприклад: **Puma**, **Nike**, **Adidas**, **кросівки**, **куртка**\n\n"
+        "Або натисніть кнопку 'Завершити пошук', щоб повернутися в меню.",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+    await state.set_state(OrderState.waiting_for_search_query)
+    await callback.answer()
+
+@dp.message(OrderState.waiting_for_search_query)
+async def process_search_query(message: types.Message, state: FSMContext):
+    """Обробляє пошуковий запит і показує результати"""
+    query = message.text.strip().lower()
+    
+    if not query:
+        await message.answer("❌ Будь ласка, введіть слово для пошуку.")
+        return
+    
+    # Отримуємо стать користувача
+    data = await state.get_data()
+    gender = data.get("gender", "чоловік")
+    
+    # Шукаємо товари
+    all_products = get_all_products()
+    found_products = []
+    
+    for p in all_products:
+        # Перевіряємо стать (якщо хочеш показувати тільки товари вибраної статі)
+        if p.get('gender') != gender:
+            continue
+        
+        # Перевіряємо, чи товар не проданий
+        text = p.get('text', '')
+        if is_sold(text):
+            delete_product_from_sheet(p.get('message_id'))
+            continue
+        
+        # Шукаємо ключове слово в тексті
+        if query in text.lower():
+            found_products.append(p)
+    
+    if not found_products:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")],
+            [InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")]
+        ])
+        await message.answer(
+            f"😕 Нічого не знайдено за запитом **{message.text}**\n\n"
+            f"Спробуйте інше ключове слово або перевірте написання.",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        await state.clear()
+        return
+    
+    # Зберігаємо результати в state
+    await state.update_data(search_results=found_products, search_query=query, gender=gender)
+    
+    # Показуємо першу сторінку результатів
+    await show_search_results(message, state, page=0)
+
+async def show_search_results(message: types.Message, state: FSMContext, page: int = 0):
+    """Показує сторінку результатів пошуку"""
+    data = await state.get_data()
+    found_products = data.get('search_results', [])
+    query = data.get('search_query', '')
+    gender = data.get('gender', 'чоловік')
+    
+    if not found_products:
+        return
+    
+    group_id = GROUPS.get(gender)
+    if not group_id:
+        await message.answer("❌ Помилка: не знайдено групу для цієї статі")
+        return
+    
+    ITEMS_PER_PAGE_SEARCH = 10
+    total = len(found_products)
+    total_pages = (total + ITEMS_PER_PAGE_SEARCH - 1) // ITEMS_PER_PAGE_SEARCH
+    page = max(0, min(page, total_pages - 1))
+    start = page * ITEMS_PER_PAGE_SEARCH
+    end = min(start + ITEMS_PER_PAGE_SEARCH, total)
+    products_page = found_products[start:end]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    
+    for p in products_page:
+        msg_id = p.get('message_id')
+        text = p.get('text', '')
+        price = extract_price(text)
+        price_text = f" - {price} грн" if price > 0 else ""
+        short_name = (text[:35] + "..") if len(text) > 35 else text
+        short_name = short_name.replace("\n", " ").replace("_", " ").strip()
+        escaped_name = escape_markdown(short_name)
+        
+        # Кнопка з посиланням на товар
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text=f"📦 {escaped_name}{price_text}", url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}")
+        ])
+        
+        # Кнопка "В кошик"
+        callback_data = f"add_{msg_id}_0_{price}"
+        if len(callback_data) > 60:
+            callback_data = f"add_{msg_id}_0"
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text="🛒 В кошик", callback_data=callback_data)
+        ])
+    
+    # Кнопки навігації
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"search_page_{page-1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"search_page_{page+1}"))
+    
+    if nav_buttons:
+        keyboard.inline_keyboard.append(nav_buttons)
+    
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")])
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")])
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Завершити пошук", callback_data="cancel_search")])
+    
+    await message.answer(
+        f"🔎 **Результати пошуку за запитом:** {query}\n"
+        f"📄 Сторінка {page+1} з {total_pages}\n"
+        f"📦 Знайдено: {total} товарів",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+    
+    # Очищаємо стан після показу результатів
+    await state.clear()
+
+@dp.callback_query(lambda c: c.data.startswith("search_page_"))
+async def search_pagination(callback: types.CallbackQuery, state: FSMContext):
+    """Пагінація результатів пошуку"""
+    page = int(callback.data.split("_")[2])
+    
+    # Отримуємо збережені результати (доведеться перечитати, бо state очищено)
+    query = callback.message.text.split("за запитом:")[1].split("\n")[0].strip() if "за запитом:" in callback.message.text else ""
+    
+    if query:
+        # Якщо є запит, шукаємо заново
+        all_products = get_all_products()
+        found_products = []
+        
+        for p in all_products:
+            text = p.get('text', '')
+            if query.lower() in text.lower():
+                if not is_sold(text):
+                    found_products.append(p)
+        
+        if found_products:
+            await state.update_data(search_results=found_products, search_query=query)
+            await show_search_results(callback.message, state, page)
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "cancel_search")
+async def cancel_search_button(callback: types.CallbackQuery, state: FSMContext):
+    """Завершує пошук і повертає в головне меню"""
+    await state.clear()
+    
+    # Отримуємо стать з кешу
+    user_id = callback.from_user.id
+    gender = user_gender_cache.get(user_id, "чоловік")
+    
+    keyboard = await get_main_menu_keyboard(gender)
+    
+    await callback.message.edit_text(
+        f"👋 Вибрана стать: {gender}\n\n🏠 Головне меню:",
+        reply_markup=keyboard
+    )
+    await callback.answer()
 
 # ========== АДМІН-КОМАНДИ ==========
 @dp.message(Command("setcard"))
