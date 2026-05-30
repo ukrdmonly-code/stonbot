@@ -862,9 +862,13 @@ async def back_to_main_menu(callback: types.CallbackQuery, state: FSMContext):
     # Видаляємо всі повідомлення з відгуками
     await delete_user_review_messages(user_id, chat_id)
     
-    # Показуємо головне меню
-    data = await state.get_data()
-    gender = data.get("gender", "чоловік")
+    # Отримуємо стать з кешу (збережену при вході в кошик)
+    gender = user_gender_cache.get(user_id)
+    if not gender:
+        # Якщо в кеші немає, пробуємо з state
+        data = await state.get_data()
+        gender = data.get("gender", "чоловік")
+    
     keyboard = await get_main_menu_keyboard(gender)
     
     # Видаляємо поточне повідомлення (з якого натиснули кнопку)
