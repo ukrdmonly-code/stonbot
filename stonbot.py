@@ -1656,15 +1656,19 @@ async def process_search_query(message: types.Message, state: FSMContext):
 
 async def show_search_results(message: types.Message, state: FSMContext, page: int = 0):
     """Показує сторінку результатів пошуку"""
-        # ========== ДІАГНОСТИКА ==========
-    logger.info("🔥🔥🔥 show_search_results ВИКЛИКАНО! (нова версія)")
+    
+    # Діагностика
+    logger.info("🔥 show_search_results ВИКЛИКАНО!")
     
     data = await state.get_data()
     found_products = data.get('search_results', [])
     query = data.get('search_query', '')
     gender = data.get('gender', 'чоловік')
     
+    logger.info(f"🔥 Знайдено товарів: {len(found_products)}")
+    
     if not found_products:
+        await message.answer("❌ Нічого не знайдено")
         return
     
     group_id = GROUPS.get(gender)
@@ -1672,15 +1676,18 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
         await message.answer("❌ Помилка: не знайдено групу для цієї статі")
         return
     
-    ITEMS_PER_PAGE_SEARCH = 10
+    ITEMS_PER_PAGE = 10
     total = len(found_products)
-    total_pages = (total + ITEMS_PER_PAGE_SEARCH - 1) // ITEMS_PER_PAGE_SEARCH
+    total_pages = (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
     page = max(0, min(page, total_pages - 1))
-    start = page * ITEMS_PER_PAGE_SEARCH
-    end = min(start + ITEMS_PER_PAGE_SEARCH, total)
+    start = page * ITEMS_PER_PAGE
+    end = min(start + ITEMS_PER_PAGE, total)
     products_page = found_products[start:end]
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    # Формуємо текст повідомлення
+    result_text = f"🔎 **Результати пошуку за запитом:** {query}\n"
+    result_text += f"📄 Сторінка {page+1} з {total_pages}\n"
+    result_text += f"📦 Знайдено: {total} товарів\n\n"
     
     for p in products_page:
         msg_id = p.get('message_id')
@@ -1688,36 +1695,19 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
         price = extract_price(text)
         price_text = f"{price:.0f} грн" if price > 0 else "ціна не вказана"
         
-        # Отримуємо назву товару (перші 35 символів)
-        short_name = text[:35] if len(text) > 35 else text
-        short_name = short_name.replace("\n", " ").replace("_", " ").strip()
+        # Назва товару
+        name = text[:40].replace("\n", " ").strip()
+        if len(text) > 40:
+            name += "..."
         
-        # Отримуємо розміри з колонки sizes
+        # Розміри
         sizes_raw = p.get('sizes', '')
         sizes_text = ""
-        if sizes_raw and sizes_raw != '':
-            # Формат: ,M,L,XL, -> прибираємо коми на початку і в кінці, замінюємо коми на пробіли
-            sizes_clean = sizes_raw.strip(',').replace(',', ' ')
-            sizes_text = f" 📏 Розміри: {sizes_clean}"
+        if sizes_raw and sizes_raw != '' and sizes_raw != ',':
+            sizes_clean = sizes_raw.strip(',').replace(',', ', ')
+            sizes_text = f" [Розміри: {sizes_clean}]"
         
-        # Екрануємо Markdown символи
-        escaped_name = escape_markdown(short_name)
-        
-        # Формуємо текст кнопки: Назва | Розміри | Ціна
-        button_text = f"📦 {escaped_name}{sizes_text} | 💰 {price_text}"
-        
-        # Кнопка з посиланням на товар
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text=button_text[:60], url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}")
-        ])
-        
-        # Кнопка "В кошик" (без розміру, бо розмір вибере клієнт при додаванні)
-        callback_data = f"add_{msg_id}_0_{price}"
-        if len(callback_data) > 60:
-            callback_data = f"add_{msg_id}_0"
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🛒 В кошик", callback_data=callback_data)
-        ])
+        result_text += f"• [{name}](https://t.me/c/{str(group_id)[4:]}/{msg_id}){sizes_text} — {price_text}\n"
     
     # Кнопки навігації
     nav_buttons = []
@@ -1726,22 +1716,20 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
     if page < total_pages - 1:
         nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"search_page_{page+1}"))
     
-    if nav_buttons:
-        keyboard.inline_keyboard.append(nav_buttons)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        nav_buttons if nav_buttons else [],
+        [InlineKeyboardButton(text="🛒 Перейти в кошик", callback_data="show_cart")],
+        [InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")],
+        [InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")]
+    ])
     
-    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")])
-    keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")])
-    keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Завершити пошук", callback_data="cancel_search")])
+    try:
+        await message.answer(result_text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
+        logger.info("🔥 Повідомлення з результатами надіслано!")
+    except Exception as e:
+        logger.error(f"🔥 ПОМИЛКА при відправці: {e}")
+        await message.answer(f"❌ Помилка: {e}")
     
-    await message.answer(
-        f"🔎 **Результати пошуку за запитом:** {query}\n"
-        f"📄 Сторінка {page+1} з {total_pages}\n"
-        f"📦 Знайдено: {total} товарів",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-    
-    # Очищаємо стан після показу результатів
     await state.clear()
 
 @dp.callback_query(lambda c: c.data.startswith("search_page_"))
