@@ -113,12 +113,6 @@ ITEMS_PER_PAGE = 20
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ========== ТЕСТОВА КОМАНДА ДЛЯ ДІАГНОСТИКИ ==========
-@dp.message(Command("addphoto_test"))
-async def test_addphoto(message: types.Message):
-    logger.info(f"🔥🔥🔥 TEST: отримано addphoto_test від {message.from_user.id}")
-    await message.answer(f"✅ Тестова команда спрацювала! Твій ID: {message.from_user.id}")
-
 PORT = int(os.environ.get("PORT", 10000))
 RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
 KEEP_ALIVE_URL = RENDER_URL.rstrip("/") + "/health" if RENDER_URL else None
@@ -126,6 +120,12 @@ KEEP_ALIVE_URL = RENDER_URL.rstrip("/") + "/health" if RENDER_URL else None
 storage = MemoryStorage()
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=storage)
+
+# ========== ТЕСТОВА КОМАНДА ДЛЯ ДІАГНОСТИКИ ==========
+@dp.message(Command("addphoto_test"))
+async def test_addphoto(message: types.Message):
+    logger.info(f"🔥🔥🔥 TEST: отримано addphoto_test від {message.from_user.id}")
+    await message.answer(f"✅ Тестова команда спрацювала! Твій ID: {message.from_user.id}")
 
 # ========== НАЛАШТУВАННЯ GOOGLE SHEETS ==========
 def init_google_sheet():
