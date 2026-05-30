@@ -1657,7 +1657,6 @@ async def process_search_query(message: types.Message, state: FSMContext):
 async def show_search_results(message: types.Message, state: FSMContext, page: int = 0):
     """Показує сторінку результатів пошуку"""
     
-    # Діагностика
     logger.info("🔥 show_search_results ВИКЛИКАНО!")
     
     data = await state.get_data()
@@ -1713,13 +1712,16 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
         # Додаємо текстовий рядок з товаром
         result_text += f"• [{name}](https://t.me/c/{str(group_id)[4:]}/{msg_id}){sizes_text} — {price_text}\n"
         
-        # Додаємо кнопку "В кошик" під товаром
+        # Додаємо кнопку "В кошик" ОДРАЗУ ПІД ЦИМ ТОВАРОМ
         callback_data = f"add_{msg_id}_0_{price}"
         if len(callback_data) > 60:
             callback_data = f"add_{msg_id}_0"
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text=f"🛒 Додати в кошик: {name[:30]}", callback_data=callback_data)
+            InlineKeyboardButton(text=f"🛒 Додати в кошик", callback_data=callback_data)
         ])
+        
+        # Додаємо порожній рядок-роздільник (не обов'язково, але для краси)
+        result_text += "\n"
     
     # Кнопки навігації
     nav_buttons = []
