@@ -134,7 +134,7 @@ async def test_addphoto(message: types.Message):
 
 def init_reviews_worksheet():
     """Ініціалізує аркуш reviews в Google Sheets"""
-    global SHEET  # ДОДАЙ ЦЕЙ РЯДОК
+    global SHEET
     try:
         if SHEET is None:
             logger.error("Немає підключення до Google Sheets")
@@ -532,6 +532,7 @@ class OrderState(StatesGroup):
     waiting_for_department = State()
     waiting_for_bank = State()
     waiting_for_payment = State()
+    waiting_for_question = State()  # Новий стан для питання
 
 class UserState(StatesGroup):
     gender = State()
@@ -749,6 +750,17 @@ async def show_cart(callback_or_message, user_id: int, edit: bool = False):
             await callback_or_message.answer(text, reply_markup=keyboard)
         return
     
+    # Визначаємо стать замовлення (за першим товаром)
+    order_gender = "чоловік"
+    for item in cart_items:
+        product_id, msg_id, group_id, name, size, price, qty = item
+        products = get_all_products()
+        for p in products:
+            if p.get('message_id') == msg_id:
+                order_gender = p.get('gender', 'чоловік')
+                break
+        break
+    
     discount, discounted_total = calculate_discounted_price(total)
     
     text = "🛒 **Ваш кошик:**\n\n"
@@ -761,7 +773,7 @@ async def show_cart(callback_or_message, user_id: int, edit: bool = False):
     if discount > 0:
         text += f"\n🎁 **Ваша знижка (-{DISCOUNT_PERCENT}%): {discount:.2f} грн**"
     text += f"\n💎 **Сума до оплати: {discounted_total:.2f} грн**\n\n"
-    text += "Для оформлення замовлення натисніть '📦 Оформити замовлення'"
+    text += "Для оформлення замовлення або зв'язку з продавцем натисніть відповідну кнопку:"
     
     keyboard_buttons = []
     for item in cart_items:
@@ -770,7 +782,20 @@ async def show_cart(callback_or_message, user_id: int, edit: bool = False):
         keyboard_buttons.append([
             InlineKeyboardButton(text=f"❌ Видалити {escaped_name} ({size})", callback_data=f"remove_cart_{product_id}_{size}")
         ])
-    keyboard_buttons.append([InlineKeyboardButton(text="📦 Оформити замовлення", callback_data="checkout")])
+    
+    # Кнопки оформлення (залежно від статі)
+    if order_gender == "жінка":
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="💳 Сплатити онлайн - знижка 5%", callback_data="checkout_online"),
+            InlineKeyboardButton(text="🚚 Накладний платіж", callback_data="checkout_cod"),
+            InlineKeyboardButton(text="📞 Зв'язатись з продавцем", callback_data="contact_seller")
+        ])
+    else:
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="💳 Сплатити онлайн - знижка 5%", callback_data="checkout_online"),
+            InlineKeyboardButton(text="📞 Зв'язатись з продавцем", callback_data="contact_seller")
+        ])
+    
     keyboard_buttons.append([InlineKeyboardButton(text="🗑 Очистити кошик", callback_data="clear_cart")])
     keyboard_buttons.append([InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")])
     
@@ -910,8 +935,9 @@ async def remove_cart_item(callback: types.CallbackQuery):
     await callback.answer("❌ Товар видалено з кошика!", show_alert=True)
     await show_cart(callback, callback.from_user.id, edit=True)
 
-@dp.callback_query(lambda c: c.data == "checkout")
-async def start_checkout(callback: types.CallbackQuery, state: FSMContext):
+# ========== ОНЛАЙН-ОПЛАТА (ЗІ ЗНИЖКОЮ) ==========
+@dp.callback_query(lambda c: c.data == "checkout_online")
+async def start_checkout_online(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     cart_items = get_cart(user_id)
     total = get_cart_total(user_id)
@@ -937,7 +963,8 @@ async def start_checkout(callback: types.CallbackQuery, state: FSMContext):
         total=total, 
         discount=discount, 
         discounted_total=discounted_total,
-        order_gender=order_gender
+        order_gender=order_gender,
+        payment_type="online"
     )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -945,7 +972,8 @@ async def start_checkout(callback: types.CallbackQuery, state: FSMContext):
     ])
     
     await callback.message.edit_text(
-        "📝 **Оформлення замовлення**\n\n"
+        "📝 **Оформлення замовлення (онлайн-оплата)**\n\n"
+        f"💰 **Сума до сплати зі знижкою {DISCOUNT_PERCENT}%: {discounted_total:.2f} грн**\n\n"
         "Будь ласка, введіть ваші дані для доставки Новою Поштою.\n\n"
         "✏️ Введіть **ваше ім'я та прізвище**:",
         reply_markup=keyboard,
@@ -954,6 +982,112 @@ async def start_checkout(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(OrderState.waiting_for_name)
     await callback.answer()
 
+# ========== НАКЛАДНИЙ ПЛАТІЖ (ТІЛЬКИ ДЛЯ ЖІНОК) ==========
+@dp.callback_query(lambda c: c.data == "checkout_cod")
+async def start_checkout_cod(callback: types.CallbackQuery, state: FSMContext):
+    """Оформлення замовлення з накладним платежем (тільки для жінок)"""
+    user_id = callback.from_user.id
+    cart_items = get_cart(user_id)
+    total = get_cart_total(user_id)
+    
+    if not cart_items:
+        await callback.answer("Кошик порожній!", show_alert=True)
+        return
+    
+    # Визначаємо стать замовлення
+    order_gender = "чоловік"
+    for item in cart_items:
+        product_id, msg_id, group_id, name, size, price, qty = item
+        products = get_all_products()
+        for p in products:
+            if p.get('message_id') == msg_id:
+                order_gender = p.get('gender', 'чоловік')
+                break
+        break
+    
+    if order_gender != "жінка":
+        await callback.answer("❌ Накладний платіж доступний тільки для жіночих товарів!", show_alert=True)
+        return
+    
+    discount, discounted_total = calculate_discounted_price(total)
+    prepayment = 300  # Фіксована передплата
+    
+    await state.update_data(
+        cart_items=cart_items,
+        total=total,
+        discounted_total=discounted_total,
+        order_gender=order_gender,
+        prepayment=prepayment,
+        payment_type="cod"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Повернутись до кошика", callback_data="show_cart")]
+    ])
+    
+    await callback.message.edit_text(
+        "📝 **Оформлення замовлення (накладний платіж)**\n\n"
+        f"💰 **Загальна сума замовлення: {total:.2f} грн**\n"
+        f"💸 **Передплата: {prepayment} грн**\n"
+        f"📦 **Решта до сплати на пошті: {total - prepayment:.2f} грн**\n\n"
+        "Будь ласка, введіть ваші дані для доставки Новою Поштою.\n\n"
+        "✏️ Введіть **ваше ім'я та прізвище**:",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+    await state.set_state(OrderState.waiting_for_name)
+    await callback.answer()
+
+# ========== ЗВ'ЯЗОК З ПРОДАВЦЕМ ==========
+@dp.callback_query(lambda c: c.data == "contact_seller")
+async def contact_seller(callback: types.CallbackQuery, state: FSMContext):
+    """Клієнт хоче зв'язатись з продавцем"""
+    user_id = callback.from_user.id
+    cart_items = get_cart(user_id)
+    
+    if not cart_items:
+        await callback.answer("Кошик порожній!", show_alert=True)
+        return
+    
+    # Зберігаємо товари з кошика в state
+    items_list = []
+    items_with_links = []
+    total = 0
+    
+    for item in cart_items:
+        product_id, msg_id, group_id, name, size, price, qty = item
+        post_link = f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
+        escaped_name = escape_markdown(name)
+        items_list.append(f"{name} (розмір {size}) x{qty} = {price * qty} грн")
+        items_with_links.append(f"[{escaped_name}]({post_link}) (розмір {size}) x{qty} = {price * qty} грн")
+        total += price * qty
+    
+    items_text = "\n".join(items_list)
+    items_with_links_text = "\n".join(items_with_links)
+    
+    await state.update_data(
+        cart_items=cart_items,
+        items_with_links=items_with_links_text,
+        total=total
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Повернутись до кошика", callback_data="show_cart")]
+    ])
+    
+    await callback.message.edit_text(
+        "📞 **Зв'язок з продавцем**\n\n"
+        f"**Ваші товари:**\n{items_text}\n\n"
+        "✏️ Напишіть ваше питання або звернення.\n"
+        "Ми зв'яжемося з вами найближчим часом!",
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+        disable_web_page_preview=True
+    )
+    await state.set_state(OrderState.waiting_for_question)
+    await callback.answer()
+
+# ========== ОБРОБНИКИ ВВЕДЕННЯ ДАНИХ ==========
 @dp.message(OrderState.waiting_for_name)
 async def process_name(message: types.Message, state: FSMContext):
     await state.update_data(user_name=message.text)
@@ -1005,9 +1139,7 @@ async def process_department(message: types.Message, state: FSMContext):
         f"🏙️ Місто: {data['user_city']}\n"
         f"🏢 Відділення НП: {data['user_department']}\n\n"
         f"📦 **Товари:**\n{items_text}\n\n"
-        f"💰 **Сума до сплати: {discounted_total:.2f} грн**\n"
-        f"🎁 (знижка -{DISCOUNT_PERCENT}%)\n\n"
-        f"Якщо все вірно, натисніть 'Підтвердити замовлення'",
+        f"💰 **Загальна сума: {total:.2f} грн**\n",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
@@ -1016,25 +1148,49 @@ async def process_department(message: types.Message, state: FSMContext):
 @dp.callback_query(lambda c: c.data == "confirm_order")
 async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    discounted_total = data.get('discounted_total', 0)
-    order_gender = data.get('order_gender', 'чоловік')
+    payment_type = data.get('payment_type', 'online')
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Монобанк", callback_data="bank_mono"),
-         InlineKeyboardButton(text="💳 Приватбанк", callback_data="bank_privat")],
-        [InlineKeyboardButton(text="🔙 Змінити дані", callback_data="show_cart")]
-    ])
+    if payment_type == "cod":
+        # Накладний платіж - показуємо передплату
+        total = data.get('total', 0)
+        prepayment = data.get('prepayment', 300)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Монобанк", callback_data="cod_bank_mono"),
+             InlineKeyboardButton(text="💳 Приватбанк", callback_data="cod_bank_privat")],
+            [InlineKeyboardButton(text="🔙 Змінити дані", callback_data="show_cart")]
+        ])
+        
+        await callback.message.edit_text(
+            f"✅ **Стать замовлення:** {data.get('order_gender', 'жінка')}\n"
+            f"💰 **Сума передплати: {prepayment} грн**\n"
+            f"📦 **Решта до сплати на пошті: {total - prepayment:.2f} грн**\n\n"
+            f"💳 **Виберіть банк для передплати:**",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+    else:
+        # Онлайн-оплата (зі знижкою)
+        discounted_total = data.get('discounted_total', 0)
+        order_gender = data.get('order_gender', 'чоловік')
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Монобанк", callback_data="bank_mono"),
+             InlineKeyboardButton(text="💳 Приватбанк", callback_data="bank_privat")],
+            [InlineKeyboardButton(text="🔙 Змінити дані", callback_data="show_cart")]
+        ])
+        
+        await callback.message.edit_text(
+            f"✅ **Стать замовлення:** {order_gender}\n"
+            f"💰 **Сума до сплати (зі знижкою {DISCOUNT_PERCENT}%): {discounted_total:.2f} грн**\n\n"
+            f"💳 **Виберіть банк для оплати:**",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
     
-    await callback.message.edit_text(
-        f"✅ **Стать замовлення:** {order_gender}\n"
-        f"💰 **Сума до сплати:** {discounted_total:.2f} грн\n"
-        f"🎁 (знижка -{DISCOUNT_PERCENT}%)\n\n"
-        f"💳 **Виберіть банк для оплати:**",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
     await callback.answer()
 
+# ========== ВИБІР БАНКУ ДЛЯ ОНЛАЙН-ОПЛАТИ ==========
 @dp.callback_query(lambda c: c.data.startswith("bank_"))
 async def process_bank_selection(callback: types.CallbackQuery, state: FSMContext):
     bank = callback.data.split("_")[1]
@@ -1068,6 +1224,42 @@ async def process_bank_selection(callback: types.CallbackQuery, state: FSMContex
     )
     await callback.answer()
 
+# ========== ВИБІР БАНКУ ДЛЯ НАКЛАДНОГО ПЛАТЕЖУ ==========
+@dp.callback_query(lambda c: c.data.startswith("cod_bank_"))
+async def process_cod_bank_selection(callback: types.CallbackQuery, state: FSMContext):
+    bank = callback.data.split("_")[2]  # cod_bank_mono -> mono
+    data = await state.get_data()
+    order_gender = data.get('order_gender', 'жінка')
+    prepayment = data.get('prepayment', 300)
+    total = data.get('total', 0)
+    
+    if order_gender == "чоловік":
+        cursor.execute(f"SELECT value FROM settings WHERE key = '{bank}_card_man'")
+    else:
+        cursor.execute(f"SELECT value FROM settings WHERE key = '{bank}_card_woman'")
+    
+    result = cursor.fetchone()
+    card_number = result[0] if result and result[0] else "XXXX-XXXX-XXXX-XXXX"
+    
+    await state.update_data(selected_bank=bank, selected_card=card_number)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Підтвердити передплату", callback_data="final_confirm_cod")],
+        [InlineKeyboardButton(text="🔙 Змінити банк", callback_data="confirm_order")]
+    ])
+    
+    await callback.message.edit_text(
+        f"✅ **Вибрано банк для передплати:** {'Монобанк' if bank == 'mono' else 'Приватбанк'}\n"
+        f"💳 **Картка:** `{card_number}`\n\n"
+        f"💰 **Сума передплати: {prepayment} грн**\n"
+        f"📦 **Решта на пошті: {total - prepayment:.2f} грн**\n\n"
+        f"Натисніть 'Підтвердити передплату' для завершення",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# ========== ФІНАЛЬНЕ ПІДТВЕРДЖЕННЯ ОНЛАЙН-ЗАМОВЛЕННЯ ==========
 @dp.callback_query(lambda c: c.data == "final_confirm")
 async def final_confirm_order(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -1150,6 +1342,145 @@ async def final_confirm_order(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
 
+# ========== ФІНАЛЬНЕ ПІДТВЕРДЖЕННЯ НАКЛАДНОГО ПЛАТЕЖУ ==========
+@dp.callback_query(lambda c: c.data == "final_confirm_cod")
+async def final_confirm_cod_order(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    user_id = callback.from_user.id
+    
+    order_number = generate_order_number()
+    
+    cart_items = data.get('cart_items', [])
+    selected_card = data.get('selected_card', '')
+    selected_bank = data.get('selected_bank', '')
+    order_gender = data.get('order_gender', 'жінка')
+    original_total = data.get('total', 0)
+    prepayment = data.get('prepayment', 300)
+    
+    items_list = []
+    items_with_links = []
+    
+    for item in cart_items:
+        product_id, msg_id, group_id, name, size, price, qty = item
+        post_link = f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
+        escaped_name = escape_markdown(name)
+        items_list.append(f"{name} (розмір {size}) x{qty} = {price * qty} грн")
+        items_with_links.append(f"[{escaped_name}]({post_link}) (розмір {size}) x{qty} = {price * qty} грн")
+    
+    items_text = "\n".join(items_list)
+    items_with_links_text = "\n".join(items_with_links)
+    
+    cursor.execute("""
+        INSERT INTO orders (order_number, user_id, user_name, user_phone, user_city, user_department, 
+                           total_amount, original_amount, discount_amount, items, items_with_links, 
+                           order_gender, selected_bank, status, payment_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'нове', 'очікує')
+    """, (order_number, user_id, data['user_name'], data['user_phone'], 
+          data['user_city'], data['user_department'], prepayment, original_total, 0,
+          items_text, items_with_links_text, order_gender, selected_bank))
+    conn.commit()
+    
+    clear_cart(user_id)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Додати чек/скрін", callback_data=f"upload_payment_{order_number}")],
+        [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
+    ])
+    
+    # Повідомлення адміну (жінці)
+    admin_to_notify = WOMAN_ADMIN_ID
+    
+    admin_text = (
+        f"🆕 **НОВЕ ЗАМОВЛЕННЯ #{order_number} (НАКЛАДНИЙ ПЛАТІЖ)**\n\n"
+        f"👤 Клієнт: {data['user_name']}\n"
+        f"🆔 ID: [{user_id}](tg://user?id={user_id})\n"
+        f"📞 Телефон: {data['user_phone']}\n"
+        f"🏙️ Місто: {data['user_city']}\n"
+        f"🏢 Відділення НП: {data['user_department']}\n"
+        f"💰 Загальна сума: {original_total:.2f} грн\n"
+        f"💸 Передплата: {prepayment} грн\n"
+        f"📦 Решта на пошті: {original_total - prepayment:.2f} грн\n"
+        f"💳 Банк для передплати: {'Монобанк' if selected_bank == 'mono' else 'Приватбанк'}\n"
+        f"⚧️ Стать замовлення: {order_gender}\n\n"
+        f"📦 **Товари:**\n{items_with_links_text}\n\n"
+        f"⏳ Статус: очікує передплати"
+    )
+    
+    await bot.send_message(admin_to_notify, admin_text, parse_mode="Markdown", disable_web_page_preview=True)
+    
+    await callback.message.edit_text(
+        f"✅ **Замовлення #{order_number} створено!**\n\n"
+        f"💳 **Передплата на картку {selected_bank.upper()}:**\n"
+        f"`{selected_card}`\n\n"
+        f"💰 **Сума передплати: {prepayment} грн**\n"
+        f"📦 **Решта до сплати на пошті: {original_total - prepayment:.2f} грн**\n\n"
+        f"📸 Внесіть передплату, натисніть кнопку 'Додати чек/скрін' та завантажте фото чека.\n\n"
+        f"Ми перевіримо оплату та надішлемо замовлення Новою Поштою.",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+    await state.clear()
+    await callback.answer()
+
+# ========== ПИТАННЯ ВІД КЛІЄНТА ==========
+@dp.message(OrderState.waiting_for_question)
+async def process_question(message: types.Message, state: FSMContext):
+    """Отримує питання від клієнта і пересилає адміну"""
+    user_id = message.from_user.id
+    question_text = message.text
+    
+    data = await state.get_data()
+    cart_items = data.get('cart_items', [])
+    items_with_links = data.get('items_with_links', '')
+    total = data.get('total', 0)
+    
+    # Визначаємо стать замовлення
+    order_gender = "чоловік"
+    for item in cart_items:
+        product_id, msg_id, group_id, name, size, price, qty = item
+        products = get_all_products()
+        for p in products:
+            if p.get('message_id') == msg_id:
+                order_gender = p.get('gender', 'чоловік')
+                break
+        break
+    
+    # Визначаємо кому надсилати (чоловік/жінка)
+    if order_gender == "чоловік":
+        admin_to_notify = ADMIN_ID
+    else:
+        admin_to_notify = WOMAN_ADMIN_ID
+    
+    # Формуємо повідомлення для адміна
+    admin_text = (
+        f"📞 **НОВЕ ПИТАННЯ ВІД КЛІЄНТА**\n\n"
+        f"👤 Клієнт: {message.from_user.full_name}\n"
+        f"🆔 ID: [{user_id}](tg://user?id={user_id})\n"
+        f"👤 Username: @{message.from_user.username if message.from_user.username else 'немає'}\n"
+        f"⚧️ Стать замовлення: {order_gender}\n"
+        f"💰 Загальна сума кошика: {total:.2f} грн\n\n"
+        f"📦 **Товари в кошику:**\n{items_with_links}\n\n"
+        f"❓ **Питання клієнта:**\n{question_text}\n\n"
+        f"💡 Натисніть на ID клієнта, щоб відповісти йому особисто."
+    )
+    
+    # Надсилаємо адміну
+    await bot.send_message(admin_to_notify, admin_text, parse_mode="Markdown", disable_web_page_preview=True)
+    
+    # Підтверджуємо клієнту
+    await message.answer(
+        "✅ **Ваше звернення відправлено!**\n\n"
+        "Ми зв'яжемося з вами найближчим часом.\n"
+        "Дякуємо, що звернулися до нас! 💙",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
+        ])
+    )
+    
+    # Очищаємо стан
+    await state.clear()
+
+# ========== ОБРОБКА ЧЕКІВ ==========
 @dp.callback_query(lambda c: c.data.startswith("upload_payment_"))
 async def upload_payment(callback: types.CallbackQuery, state: FSMContext):
     order_number = callback.data.split("_")[2]
@@ -1201,7 +1532,7 @@ async def process_payment_screenshot(message: types.Message, state: FSMContext):
             f"📞 Телефон: {order[1]}\n"
             f"🏙️ Місто: {order[2]}\n"
             f"🏢 Відділення НП: {order[3]}\n"
-            f"💰 Сума зі знижкою: {order[4]:.2f} грн\n"
+            f"💰 Сума: {order[4]:.2f} грн\n"
             f"💰 Оригінальна сума: {order[5]:.2f} грн\n"
             f"🎁 Знижка: {order[6]:.2f} грн\n"
             f"⚧️ Стать замовлення: {order[8]}\n\n"
@@ -1780,8 +2111,6 @@ async def catch_edited_post(message: types.Message):
     sizes_str = "," + ",".join(sizes) + ","
     update_product_in_sheet(message.message_id, full_text, sizes_str, gender, category, season)
     logger.info(f"🔄 Оновлено після редагування: {message.message_id}")
-
-
 
 # ========== HTTP СЕРВЕР ==========
 async def health_check(request):
