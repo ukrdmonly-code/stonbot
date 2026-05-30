@@ -1656,6 +1656,9 @@ async def process_search_query(message: types.Message, state: FSMContext):
 
 async def show_search_results(message: types.Message, state: FSMContext, page: int = 0):
     """Показує сторінку результатів пошуку"""
+        # ========== ДІАГНОСТИКА ==========
+    logger.info("🔥🔥🔥 show_search_results ВИКЛИКАНО! (нова версія)")
+    
     data = await state.get_data()
     found_products = data.get('search_results', [])
     query = data.get('search_query', '')
