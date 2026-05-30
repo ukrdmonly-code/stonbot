@@ -16,6 +16,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
 import aiohttp
 
+# Кеш для відгуків (зберігає ID повідомлень для кожного користувача)
+user_reviews_cache = {}
+
 # ========== НАЛАШТУВАННЯ ==========
 TOKEN = "8394512581:AAFCN9H3dhHPOG1a0KI1LJ5Uvb6CcnHcLMc"
 
@@ -251,9 +254,14 @@ async def cmd_done_reviews(message: types.Message, state: FSMContext):
 
 REVIEWS_PER_PAGE = 10
 
+# Кеш для зберігання ID повідомлень
+# {user_id: {'messages': [msg_ids], 'current_page': page, 'pages': {page: msg_id}}}
+user_reviews_cache = {}
+
 @dp.callback_query(lambda c: c.data == "show_reviews")
 async def show_reviews(callback: types.CallbackQuery):
     """Показує першу сторінку відгуків"""
+    user_id = callback.from_user.id
     reviews = get_all_reviews()
     
     if not reviews:
@@ -270,11 +278,20 @@ async def show_reviews(callback: types.CallbackQuery):
     total = len(reviews)
     total_pages = (total + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
     
+    # Ініціалізуємо кеш для користувача
+    user_reviews_cache[user_id] = {
+        'messages': [],
+        'pages': {},
+        'total_pages': total_pages,
+        'reviews': reviews
+    }
+    
     await show_reviews_page(callback, page=0, total_pages=total_pages, reviews=reviews)
     await callback.answer()
 
 async def show_reviews_page(callback: types.CallbackQuery, page: int, total_pages: int, reviews: list):
     """Показує конкретну сторінку відгуків"""
+    user_id = callback.from_user.id
     start = page * REVIEWS_PER_PAGE
     end = min(start + REVIEWS_PER_PAGE, len(reviews))
     page_reviews = reviews[start:end]
@@ -283,46 +300,111 @@ async def show_reviews_page(callback: types.CallbackQuery, page: int, total_page
         await callback.answer("❌ Немає відгуків на цій сторінці")
         return
     
-    media_group = []
-    for file_id in page_reviews:
-        media_group.append(types.InputMediaPhoto(media=file_id))
+    # Видаляємо всі попередні повідомлення (альбоми і текст)
+    if user_id in user_reviews_cache:
+        for msg_id in user_reviews_cache[user_id]['messages']:
+            try:
+                await bot.delete_message(callback.from_user.id, msg_id)
+            except:
+                pass
+        user_reviews_cache[user_id]['messages'] = []
     
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"reviews_page_{page-1}"))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"reviews_page_{page+1}"))
+    # Перевіряємо, чи вже є збережений альбом для цієї сторінки
+    if page in user_reviews_cache[user_id]['pages']:
+        # Якщо є — просто показуємо його (не створюючи новий)
+        msg_id = user_reviews_cache[user_id]['pages'][page]
+        user_reviews_cache[user_id]['messages'].append(msg_id)
+    else:
+        # Якщо немає — створюємо новий альбом
+        media_group = []
+        for file_id in page_reviews:
+            media_group.append(types.InputMediaPhoto(media=file_id))
+        
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"reviews_page_{page-1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton(text="Вперед ▶️", callback_data=f"reviews_page_{page+1}"))
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            nav_buttons if nav_buttons else [],
+            [InlineKeyboardButton(text="🏠 Головне меню", callback_data="reviews_main_menu")]
+        ])
+        
+        # Видаляємо старе текстове повідомлення (якщо є)
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        
+        # Надсилаємо альбом
+        sent_messages = await callback.message.answer_media_group(media=media_group)
+        
+        # Зберігаємо ID альбому в кеш
+        album_msg_id = sent_messages[0].message_id
+        user_reviews_cache[user_id]['pages'][page] = album_msg_id
+        user_reviews_cache[user_id]['messages'].append(album_msg_id)
+        
+        # Надсилаємо текст з кнопками
+        text_msg = await callback.message.answer(
+            f"📸 **Відгуки покупців**\n📄 Сторінка {page+1} з {total_pages}",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        user_reviews_cache[user_id]['messages'].append(text_msg.message_id)
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        nav_buttons if nav_buttons else [],
-        [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
-    ])
-    
-    try:
-        await callback.message.delete()
-    except:
-        pass
-    
-    await callback.message.answer_media_group(media=media_group)
-    await callback.message.answer(
-        f"📸 **Відгуки покупців**\n📄 Сторінка {page+1} з {total_pages}",
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
+    user_reviews_cache[user_id]['current_page'] = page
 
 @dp.callback_query(lambda c: c.data.startswith("reviews_page_"))
 async def reviews_pagination(callback: types.CallbackQuery):
     """Обробляє пагінацію відгуків"""
     page = int(callback.data.split("_")[2])
-    reviews = get_all_reviews()
-    total = len(reviews)
-    total_pages = (total + REVIEWS_PER_PAGE - 1) // REVIEWS_PER_PAGE
+    user_id = callback.from_user.id
+    
+    if user_id not in user_reviews_cache:
+        await callback.answer("❌ Сесія закінчилась, почніть заново")
+        return
+    
+    data = user_reviews_cache[user_id]
+    total_pages = data['total_pages']
+    reviews = data['reviews']
     
     if page < 0 or page >= total_pages:
         await callback.answer("Немає більше відгуків")
         return
     
     await show_reviews_page(callback, page, total_pages, reviews)
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "reviews_main_menu")
+async def reviews_back_to_main_menu(callback: types.CallbackQuery, state: FSMContext):
+    """Повертає в головне меню і видаляє всі повідомлення з відгуками"""
+    user_id = callback.from_user.id
+    
+    # Видаляємо всі повідомлення з відгуками
+    if user_id in user_reviews_cache:
+        for msg_id in user_reviews_cache[user_id]['messages']:
+            try:
+                await bot.delete_message(callback.from_user.id, msg_id)
+            except:
+                pass
+        del user_reviews_cache[user_id]
+    
+    # Показуємо головне меню
+    data = await state.get_data()
+    gender = data.get("gender", "чоловік")
+    keyboard = await get_main_menu_keyboard(gender)
+    
+    # Видаляємо поточне повідомлення з кнопкою
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    await callback.message.answer(
+        f"👋 Вибрана стать: {gender}\n\n🏠 Головне меню:",
+        reply_markup=keyboard
+    )
     await callback.answer()
 
 # ========== НАЛАШТУВАННЯ GOOGLE SHEETS ==========
