@@ -869,6 +869,9 @@ async def back_to_main_menu(callback: types.CallbackQuery, state: FSMContext):
         data = await state.get_data()
         gender = data.get("gender", "чоловік")
     
+    # ВІДНОВЛЮЄМО СТАТЬ В STATE (це головне!)
+    await state.update_data(gender=gender)
+    
     keyboard = await get_main_menu_keyboard(gender)
     
     # Видаляємо поточне повідомлення (з якого натиснули кнопку)
