@@ -1683,12 +1683,7 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
     end = min(start + ITEMS_PER_PAGE, total)
     products_page = found_products[start:end]
     
-    # Формуємо текст повідомлення
-    result_text = f"🔎 **Результати пошуку за запитом:** {query}\n"
-    result_text += f"📄 Сторінка {page+1} з {total_pages}\n"
-    result_text += f"📦 Знайдено: {total} товарів\n\n"
-    
-    # Створюємо клавіатуру з кнопками
+    # Створюємо клавіатуру
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     
     for p in products_page:
@@ -1697,9 +1692,9 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
         price = extract_price(text)
         price_text = f"{price:.0f} грн" if price > 0 else "ціна не вказана"
         
-        # Назва товару (для тексту)
-        name = text[:40].replace("\n", " ").strip()
-        if len(text) > 40:
+        # Назва товару
+        name = text[:35].replace("\n", " ").strip()
+        if len(text) > 35:
             name += "..."
         
         # Розміри
@@ -1707,21 +1702,21 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
         sizes_text = ""
         if sizes_raw and sizes_raw != '' and sizes_raw != ',':
             sizes_clean = sizes_raw.strip(',').replace(',', ', ')
-            sizes_text = f" [Розміри: {sizes_clean}]"
+            sizes_text = f" [{sizes_clean}]"
         
-        # Додаємо текстовий рядок з товаром
-        result_text += f"• [{name}](https://t.me/c/{str(group_id)[4:]}/{msg_id}){sizes_text} — {price_text}\n"
+        # Кнопка з посиланням на товар (показує назву, розміри, ціну)
+        button_text = f"📦 {name}{sizes_text} — {price_text}"
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text=button_text[:60], url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}")
+        ])
         
-        # Додаємо кнопку "В кошик" ОДРАЗУ ПІД ЦИМ ТОВАРОМ
+        # Кнопка "В кошик"
         callback_data = f"add_{msg_id}_0_{price}"
         if len(callback_data) > 60:
             callback_data = f"add_{msg_id}_0"
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text=f"🛒 Додати в кошик", callback_data=callback_data)
+            InlineKeyboardButton(text="🛒 В кошик", callback_data=callback_data)
         ])
-        
-        # Додаємо порожній рядок-роздільник (не обов'язково, але для краси)
-        result_text += "\n"
     
     # Кнопки навігації
     nav_buttons = []
@@ -1737,12 +1732,14 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")])
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔎 Новий пошук", callback_data="search_by_name")])
     
-    try:
-        await message.answer(result_text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
-        logger.info("🔥 Повідомлення з результатами надіслано!")
-    except Exception as e:
-        logger.error(f"🔥 ПОМИЛКА при відправці: {e}")
-        await message.answer(f"❌ Помилка: {e}")
+    await message.answer(
+        f"🔎 **Результати пошуку за запитом:** {query}\n"
+        f"📄 Сторінка {page+1} з {total_pages}\n"
+        f"📦 Знайдено: {total} товарів",
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+        disable_web_page_preview=True
+    )
     
     await state.clear()
 
