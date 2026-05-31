@@ -1839,6 +1839,307 @@ async def cancel_search_button(callback: types.CallbackQuery, state: FSMContext)
     await callback.answer()
 
 # ========== АДМІН-КОМАНДИ ==========
+
+# Словник для зберігання file_id голосових повідомлень (поки пустий)
+TUTORIAL_VOICES = {}  # Поки пусто, додаси пізніше
+
+# Зберігаємо стан туторіалу для кожного користувача
+user_tutorial_data = {}  # {user_id: {'size': str, 'gender': str, 'products': list, 'step': int}}
+
+@dp.callback_query(lambda c: c.data == "tutorial_all_sizes")
+async def tutorial_all_sizes(callback: types.CallbackQuery, state: FSMContext):
+    """Запускає туторіал для загального пошуку (без озвучки)"""
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    # Отримуємо стать користувача
+    data = await state.get_data()
+    gender = data.get("gender", "чоловік")
+    
+    # Очищаємо старі дані туторіалу
+    if user_id in user_tutorial_data:
+        del user_tutorial_data[user_id]
+    
+    # Крок 1: просто текст, без голосу
+    await callback.message.edit_text(
+        "🎓 **Туторіал: Загальний пошук**\n\n"
+        "⬇️ **Крок 1/5** ⬇️\n\n"
+        "📌 Вкладка 'Загальний пошук' показує список всіх товарів обраного вами розміру."
+    )
+    
+    # Зберігаємо дані для наступних кроків
+    user_tutorial_data[user_id] = {
+        'gender': gender,
+        'step': 1
+    }
+    
+    # Показуємо кнопку для переходу до наступного кроку
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="▶️ Наступний крок", callback_data="tutorial_next_step")]
+    ])
+    await callback.message.answer(
+        "Натисніть 'Наступний крок', щоб продовжити",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "tutorial_next_step")
+async def tutorial_next_step(callback: types.CallbackQuery, state: FSMContext):
+    """Перехід до наступного кроку туторіалу"""
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    if user_id not in user_tutorial_data:
+        await callback.answer("❌ Туторіал не знайдено. Почніть заново.", show_alert=True)
+        return
+    
+    tutorial_data = user_tutorial_data[user_id]
+    current_step = tutorial_data.get('step', 1)
+    gender = tutorial_data.get('gender', 'чоловік')
+    group_id = GROUPS.get(gender)
+    
+    # Видаляємо попереднє повідомлення з кнопкою
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    if current_step == 1:
+        # ========== КРОК 2 ==========
+        # Бот обирає розмір М і показує список товарів
+        await callback.message.answer(
+            "📌 **Крок 2/5:** Обираємо розмір **M** та показуємо список товарів."
+        )
+        
+        # Шукаємо товари розміру M
+        all_products = find_products_by_size_and_gender("M", gender, None, None)
+        available = []
+        for p in all_products:
+            text = p.get('text', '')
+            if not is_sold(text):
+                available.append(p)
+        
+        if not available:
+            await callback.message.answer("❌ Немає товарів розміру M для демонстрації.")
+            return
+        
+        # Зберігаємо знайдені товари
+        tutorial_data['products'] = available
+        tutorial_data['size'] = "M"
+        tutorial_data['current_product_index'] = 0
+        tutorial_data['step'] = 2
+        
+        # Показуємо список товарів
+        await show_tutorial_products(callback, user_id, chat_id, gender, available, 0)
+        
+    elif current_step == 2:
+        # ========== КРОК 3 ==========
+        await callback.message.answer(
+            "📌 **Крок 3/5:** Зараз я відкрию перший товар. Натисніть на посилання, щоб побачити його в групі."
+        )
+        
+        products = tutorial_data.get('products', [])
+        current_idx = tutorial_data.get('current_product_index', 0)
+        
+        if products and current_idx < len(products):
+            p = products[current_idx]
+            msg_id = p.get('message_id')
+            text = p.get('text', '')
+            name = text[:50].replace("\n", " ").strip()
+            if len(text) > 50:
+                name += "..."
+            
+            # Посилання на товар в групі
+            product_url = f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔗 Переглянути товар у групі", url=product_url)],
+                [InlineKeyboardButton(text="✅ Я переглянув(ла), продовжити", callback_data="tutorial_after_product_view")]
+            ])
+            
+            await callback.message.answer(
+                f"📦 **Товар для перегляду:**\n{name}\n\n"
+                f"Натисніть на кнопку нижче, щоб перейти в групу і подивитися пост.",
+                reply_markup=keyboard,
+                disable_web_page_preview=True
+            )
+        else:
+            await callback.answer("❌ Немає товарів для демонстрації", show_alert=True)
+        
+    elif current_step == 3:
+        # ========== КРОК 4 ==========
+        await callback.message.answer(
+            "📌 **Крок 4/5:** Щоб повернутися до списку товарів, натисніть на закріплену кнопку **'Відкрити бота'** в групі.\n\n"
+            "➡️ **Зараз я покажу, як це працює.**\n\n"
+            "👉 [👕 Чоловічі речі](https://t.me/ston_107)\n"
+            "👉 [👗 Жіночі речі](https://t.me/brandpage_she)\n\n"
+            "Після того, як ви натиснете на закріплену кнопку і повернетесь, натисніть 'Я повернувся(лась)'.",
+            disable_web_page_preview=True
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Я повернувся(лась) до бота", callback_data="tutorial_back_to_bot")]
+        ])
+        await callback.message.answer(
+            "Натисніть цю кнопку ПІСЛЯ того, як повернетесь через закріплену кнопку в групі:",
+            reply_markup=keyboard
+        )
+        
+    elif current_step == 4:
+        # ========== КРОК 5 ==========
+        await callback.message.answer(
+            "📌 **Крок 5/5:** Давайте ще раз потренуємося!\n\n"
+            "Зараз я покажу ще кілька товарів. Спробуйте самостійно:\n"
+            "1. Натисніть на товар → перейдіть у групу\n"
+            "2. Подивіться пост\n"
+            "3. Поверніться через закріплену кнопку 'Відкрити бота'\n"
+            "4. Продовжуйте з наступним товаром"
+        )
+        
+        products = tutorial_data.get('products', [])
+        current_idx = tutorial_data.get('current_product_index', 0)
+        tutorial_data['step'] = 5
+        tutorial_data['current_product_index'] = current_idx + 1
+        
+        # Показуємо наступні товари (2-3 штуки)
+        await show_practice_products(callback, user_id, chat_id, gender, products, current_idx + 1)
+        
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "tutorial_after_product_view")
+async def tutorial_after_product_view(callback: types.CallbackQuery, state: FSMContext):
+    """Клієнт переглянув товар, переходимо до наступного кроку"""
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    if user_id not in user_tutorial_data:
+        await callback.answer("❌ Туторіал не знайдено", show_alert=True)
+        return
+    
+    tutorial_data = user_tutorial_data[user_id]
+    tutorial_data['step'] = 3
+    
+    # Переходимо до кроку 4 (пояснення про кнопку)
+    await tutorial_next_step(callback, state)
+
+@dp.callback_query(lambda c: c.data == "tutorial_back_to_bot")
+async def tutorial_back_to_bot(callback: types.CallbackQuery, state: FSMContext):
+    """Клієнт повернувся через кнопку Відкрити бота"""
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    if user_id not in user_tutorial_data:
+        await callback.answer("❌ Туторіал не знайдено", show_alert=True)
+        return
+    
+    tutorial_data = user_tutorial_data[user_id]
+    tutorial_data['step'] = 4
+    
+    # Переходимо до кроку 5 (практика)
+    await tutorial_next_step(callback, state)
+
+async def show_tutorial_products(callback: types.CallbackQuery, user_id: int, chat_id: int, gender: str, products: list, start_idx: int):
+    """Показує список товарів для туторіалу"""
+    group_id = GROUPS.get(gender)
+    if not group_id:
+        return
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    
+    # Показуємо перші 5 товарів
+    for i, p in enumerate(products[start_idx:start_idx+5]):
+        msg_id = p.get('message_id')
+        text = p.get('text', '')
+        price = extract_price(text)
+        price_text = f" - {price:.0f} грн" if price > 0 else ""
+        name = text[:40].replace("\n", " ").strip()
+        if len(text) > 40:
+            name += "..."
+        
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text=f"📦 {name}{price_text}",
+                url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
+            )
+        ])
+    
+    keyboard.inline_keyboard.append([
+        InlineKeyboardButton(text="▶️ Продовжити туторіал", callback_data="tutorial_next_step")
+    ])
+    
+    await callback.message.answer(
+        f"🔍 **Товари розміру M (демонстрація):**\n\n"
+        f"Ось список знайдених товарів. Натисніть на будь-який, щоб подивитися.\n\n"
+        f"Після перегляду натисніть 'Продовжити туторіал'.",
+        reply_markup=keyboard,
+        disable_web_page_preview=True
+    )
+
+async def show_practice_products(callback: types.CallbackQuery, user_id: int, chat_id: int, gender: str, products: list, start_idx: int):
+    """Показує товари для практики (крок 5)"""
+    group_id = GROUPS.get(gender)
+    if not group_id:
+        return
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    
+    # Показуємо наступні 3 товари для практики
+    for i, p in enumerate(products[start_idx:start_idx+3]):
+        msg_id = p.get('message_id')
+        text = p.get('text', '')
+        price = extract_price(text)
+        price_text = f" - {price:.0f} грн" if price > 0 else ""
+        name = text[:40].replace("\n", " ").strip()
+        if len(text) > 40:
+            name += "..."
+        
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text=f"📦 {name}{price_text}",
+                url=f"https://t.me/c/{str(group_id)[4:]}/{msg_id}"
+            )
+        ])
+    
+    keyboard.inline_keyboard.append([
+        [InlineKeyboardButton(text="✅ Завершити туторіал", callback_data="finish_tutorial")]
+    ])
+    
+    await callback.message.answer(
+        f"🔍 **Товари для самостійної практики:**\n\n"
+        f"Спробуйте самостійно:\n"
+        f"1️⃣ Натисніть на товар\n"
+        f"2️⃣ Подивіться пост у групі\n"
+        f"3️⃣ Поверніться через закріплену кнопку 'Відкрити бота'\n"
+        f"4️⃣ Натисніть 'Завершити туторіал'\n\n"
+        f"💡 **Підказка:** Закріплена кнопка знаходиться вгорі групи!",
+        reply_markup=keyboard,
+        disable_web_page_preview=True
+    )
+
+@dp.callback_query(lambda c: c.data == "finish_tutorial")
+async def finish_tutorial(callback: types.CallbackQuery, state: FSMContext):
+    """Завершення туторіалу"""
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    # Очищаємо дані туторіалу
+    if user_id in user_tutorial_data:
+        del user_tutorial_data[user_id]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 Спробувати загальний пошук", callback_data="show_all_sizes")],
+        [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
+    ])
+    
+    await callback.message.edit_text(
+        "✅ **Туторіал завершено!**\n\n"
+        "Тепер ви знаєте, як користуватися загальним пошуком.\n\n"
+        "💡 **Порада:** Закріплена кнопка **'Відкрити бота'** в групі допоможе швидко повертатися до бота після перегляду товарів.\n\n"
+        "Спробуйте самі обрати будь-який розмір і переглянути товари!",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
 @dp.message(Command("setcard"))
 async def set_bank_card(message: types.Message):
     if message.from_user.id not in [ADMIN_ID, WOMAN_ADMIN_ID]:
