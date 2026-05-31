@@ -2357,6 +2357,7 @@ async def show_all_sizes(callback: types.CallbackQuery, state: FSMContext):
         if len(row) == 4 or i == len(sizes) - 1:
             buttons.append(row)
             row = []
+    buttons.append([InlineKeyboardButton(text="❓ Як це працює?", callback_data="tutorial_all_sizes")])
     buttons.append([InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")])
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
