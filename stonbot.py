@@ -1780,10 +1780,21 @@ async def show_search_results(message: types.Message, state: FSMContext, page: i
         if len(text) > 50:
             name += "..."
         
+        # ========== ВИПРАВЛЕНА ЧАСТИНА (розміри) ==========
         sizes_raw = p.get('sizes', '')
         sizes_text = ""
         if sizes_raw and sizes_raw != '' and sizes_raw != ',':
-            sizes_clean = sizes_raw.strip(',').replace(',', ', ')
+            # Перевіряємо тип і конвертуємо в рядок, якщо потрібно
+            if not isinstance(sizes_raw, str):
+                sizes_raw = str(sizes_raw)
+            
+            # Якщо це число типу 4243 (без ком) - розділяємо на окремі розміри
+            if sizes_raw.isdigit() and len(sizes_raw) > 2:
+                import re
+                parts = re.findall(r'\d{2}', sizes_raw)
+                sizes_clean = ', '.join(parts)
+            else:
+                sizes_clean = sizes_raw.strip(',').replace(',', ', ')
             sizes_text = f"\n📏 Розміри: {sizes_clean}"
         
         product_text = f"📦 **{name}**{sizes_text}\n💰 {price_text}\n\n[🔗 Переглянути товар](https://t.me/c/{str(group_id)[4:]}/{msg_id})"
