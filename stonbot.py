@@ -824,6 +824,12 @@ async def show_cart(callback_or_message, user_id: int, edit: bool = False):
         await callback_or_message.message.edit_text(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
     else:
         await callback_or_message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
+# ========== ЛОГУВАННЯ для відео
+@dp.message(lambda message: message.video)
+async def log_video(message: types.Message):
+    file_id = message.video.file_id
+    logger.info(f"🎥 Отримано відео. file_id: {file_id}")
+    await message.answer(f"✅ file_id отримано!\n\n`{file_id}`", parse_mode="Markdown")
 
 # ========== ЛОГУВАННЯ ГОЛОСОВИХ ТА АУДІО (тимчасово) ==========
 @dp.message(lambda message: message.voice or message.audio)
