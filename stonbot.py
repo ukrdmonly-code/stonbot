@@ -825,13 +825,21 @@ async def show_cart(callback_or_message, user_id: int, edit: bool = False):
     else:
         await callback_or_message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
 
-# ========== ЛОГУВАННЯ ГОЛОСОВИХ ПОВІДОМЛЕНЬ (тимчасово) ==========
-@dp.message(lambda message: message.voice)
-async def log_voice(message: types.Message):
-    """Логує file_id голосових повідомлень"""
-    file_id = message.voice.file_id
-    logger.info(f"🎙️ Отримано голосове. file_id: {file_id}")
-    await message.answer(f"✅ Голосове отримано!\n\n`{file_id}`", parse_mode="Markdown")
+# ========== ЛОГУВАННЯ ГОЛОСОВИХ ТА АУДІО (тимчасово) ==========
+@dp.message(lambda message: message.voice or message.audio)
+async def log_voice_and_audio(message: types.Message):
+    """Логує file_id голосових та аудіо повідомлень"""
+    if message.voice:
+        file_id = message.voice.file_id
+        file_type = "голосове"
+    elif message.audio:
+        file_id = message.audio.file_id
+        file_type = "аудіо (mp3)"
+    else:
+        return
+    
+    logger.info(f"🎙️ Отримано {file_type}. file_id: {file_id}")
+    await message.answer(f"✅ {file_type} отримано!\n\n`{file_id}`", parse_mode="Markdown")
 
 # ========== КОМАНДА /start ==========
 @dp.message(Command("start"))
