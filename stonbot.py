@@ -1863,14 +1863,32 @@ async def cancel_search_button(callback: types.CallbackQuery, state: FSMContext)
 
 # ========== АДМІН-КОМАНДИ ==========
 
-# Встав цей код у розділ "❓ Як це працює?"
+# ========== ТУТОРІАЛ ДЛЯ ЗАГАЛЬНОГО ПОШУКУ (ВІДЕО) ==========
+
+# file_id відео-інструкції для загального пошуку
 TUTORIAL_VIDEO_ALL_SIZES = "BAACAgIAAxkBAAIUZmocStdkZspgKPVZj-rhP3Z9vxsJAAI-oAACK5rgSKKUbBeNhm55OwQ"
+
+# Словник для зберігання ID повідомлень туторіалу
+user_tutorial_messages = {}  # {user_id: [list_of_message_ids]}
+
+async def delete_tutorial_messages(user_id: int, chat_id: int):
+    """Видаляє всі повідомлення туторіалу для користувача"""
+    if user_id in user_tutorial_messages:
+        for msg_id in user_tutorial_messages[user_id]:
+            try:
+                await bot.delete_message(chat_id, msg_id)
+            except:
+                pass
+        del user_tutorial_messages[user_id]
 
 @dp.callback_query(lambda c: c.data == "tutorial_all_sizes")
 async def tutorial_all_sizes(callback: types.CallbackQuery, state: FSMContext):
     """Показує відео-інструкцію для загального пошуку"""
     user_id = callback.from_user.id
     chat_id = callback.message.chat.id
+    
+    # Видаляємо старі повідомлення туторіалу, якщо були
+    await delete_tutorial_messages(user_id, chat_id)
     
     # Видаляємо повідомлення з кнопкою "Як це працює?"
     try:
@@ -1879,28 +1897,91 @@ async def tutorial_all_sizes(callback: types.CallbackQuery, state: FSMContext):
         pass
     
     # Надсилаємо відео-інструкцію
-    await bot.send_video(
+    video_msg = await bot.send_video(
         chat_id=chat_id,
         video=TUTORIAL_VIDEO_ALL_SIZES,
-        caption="🎓 **Відео-інструкція: Загальний пошук**\n\n"
-                "У цьому відео я показую, як користуватися пошуком за розміром.\n\n"
-                "📌 **Що ви дізнаєтесь:**\n"
-                "• Як обрати розмір та побачити список товарів\n"
-                "• Як переглянути товар у групі\n"
-                "• Як повернутися до бота через закріплену кнопку\n\n"
-                "⬇️ Після перегляду натисніть кнопку нижче ⬇️",
+        caption="🎓 **Як правильно користуватися пошуком.**\n\n"
+                "📌 **Головне, ви зрозумієте як повернутися до бота через закріплену кнопку в групі і зможете зручно переглядати товари зі списку **\n",
         parse_mode="Markdown"
     )
     
     # Кнопка для повернення
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Спробувати загальний пошук", callback_data="show_all_sizes")],
-        [InlineKeyboardButton(text="🏠 Головне меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="🔍 Спробувати загальний пошук", callback_data="tutorial_try_search")],
+        [InlineKeyboardButton(text="🏠 Головне меню", callback_data="tutorial_main_menu")]
     ])
     
+    menu_msg = await bot.send_message(
+        chat_id,
+        "✅ Переглянули відео?\n\nТепер можете спробувати самостійно!",
+        reply_markup=keyboard
+    )
+    
+    # Зберігаємо ID повідомлень туторіалу
+    user_tutorial_messages[user_id] = [video_msg.message_id, menu_msg.message_id]
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "tutorial_try_search")
+async def tutorial_try_search(callback: types.CallbackQuery, state: FSMContext):
+    """Клієнт хоче спробувати загальний пошук (видаляємо туторіал)"""
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    # Видаляємо всі повідомлення туторіалу
+    await delete_tutorial_messages(user_id, chat_id)
+    
+    # Видаляємо поточне повідомлення
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    # Отримуємо стать користувача
+    data = await state.get_data()
+    gender = data.get("gender", "чоловік")
+    
+    # Показуємо вкладку загального пошуку
+    sizes = CLOTHING_SIZES
+    buttons = []
+    row = []
+    for i, size in enumerate(sizes):
+        row.append(InlineKeyboardButton(text=size, callback_data=f"all_size_{size}_{gender}"))
+        if len(row) == 4 or i == len(sizes) - 1:
+            buttons.append(row)
+            row = []
+    buttons.append([InlineKeyboardButton(text="❓ Як це працює?", callback_data="tutorial_all_sizes")])
+    buttons.append([InlineKeyboardButton(text="🔙 Головне меню", callback_data="main_menu")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await bot.send_message(chat_id, "🔍 **Загальний пошук**\n\nОберіть розмір одягу:", reply_markup=keyboard)
+    
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "tutorial_main_menu")
+async def tutorial_main_menu(callback: types.CallbackQuery, state: FSMContext):
+    """Повертає в головне меню і видаляє туторіал"""
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    # Видаляємо всі повідомлення туторіалу
+    await delete_tutorial_messages(user_id, chat_id)
+    
+    # Видаляємо поточне повідомлення
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    
+    # Отримуємо стать користувача
+    data = await state.get_data()
+    gender = data.get("gender", "чоловік")
+    
+    # Показуємо головне меню
+    keyboard = await get_main_menu_keyboard(gender)
     await bot.send_message(
         chat_id,
-        "✅ **Переглянули відео?**\n\nТепер можете спробувати самостійно!",
+        f"👋 Вибрана стать: {gender}\n\n🏠 Головне меню:",
         reply_markup=keyboard
     )
     
