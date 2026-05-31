@@ -1633,7 +1633,7 @@ async def search_by_name(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "🔎 **Пошук по назві товару**\n\n"
         "Введіть назву бренду або ключове слово для пошуку.\n"
-        "Наприклад: **Puma**, **Nike**, **Adidas**, **кросівки**, **куртка**\n\n"
+        "Наприклад: **Puma**, **Nike**, **Adidas**, **Кросівки**, **Куртка**, **Спортивки**, **Шорти puma M**\n\n"
         "Або натисніть кнопку 'Завершити пошук', щоб повернутися в меню.",
         reply_markup=keyboard,
         parse_mode="Markdown"
